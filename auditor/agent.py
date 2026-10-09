@@ -10,6 +10,7 @@ With no LLM configured the same pipeline runs with registered plans and template
 from __future__ import annotations
 
 import json
+import math
 import re
 import time
 import uuid
@@ -95,6 +96,8 @@ operational data, not to judge it yet.
 Rules:
 - Choose metrics ONLY from the provided catalog (use the exact "key"). Filters ("where") may only use a
   metric's listed dims, with values that exist in the data (e.g. task_type "Classify").
+- Never filter on a value that identifies the AI itself (e.g. the AI's own model_id or tool name): that
+  removes the non-AI comparison group. Filter on the kind of work instead (task_type, category, stage).
 - Pick the strongest feasible design for the primary metric:
   "did" (difference-in-differences; needs adopters_for_did) > "treated" (needs per_record_ai_flag)
   > "before_after" (needs a rollout date). The engine will also run the other feasible designs as a cross-check.
@@ -245,7 +248,7 @@ def _collect_numbers(obj, out: list) -> None:
 def grounding_check(texts: list[str], known: list) -> dict:
     pool: list[float] = []
     _collect_numbers(known, pool)
-    pool_abs = [abs(x) for x in pool]
+    pool_abs = [abs(x) for x in pool if math.isfinite(x)]  # evidence can hold NaN/inf (e.g. se of n=1)
     checked, unverified = 0, []
     for text in texts:
         for tok in _NUM.findall(text or ""):
@@ -277,6 +280,23 @@ def _run_design(log: EvidenceLog, design: str, metric: str, where: dict, cutoff:
     if design == "before_after" and cutoff:
         return engine.before_after(log, metric, cutoff, where, until=until)
     return None
+
+
+def _measure(log: EvidenceLog, design: str, metric: str, where: dict, cutoff: str | None,
+             until: str | None) -> tuple[dict | None, list]:
+    """Run the planned design first, then every other feasible design as a cross-check."""
+    eff, tri = None, []
+    for d in [design] + [x for x in ("did", "treated", "before_after") if x != design]:
+        e = effect(_run_design(log, d, metric, where, cutoff, until))
+        if e is None:
+            continue
+        if eff is None and d == design:
+            eff = e
+        else:
+            tri.append(e)
+    if eff is None and tri:  # planned design had no data; fall back to the next one
+        eff = tri.pop(0)
+    return eff, tri
 
 
 def _claim_date_level(log: EvidenceLog, claim: dict | None, metric_key: str, where: dict,
@@ -404,18 +424,19 @@ def run_audit(use_case_id: str | None = None, claim_text: str | None = None, llm
         pm, pw = plan["primary"]["metric"], plan["primary"]["where"]
         metric = METRICS[pm]
         censored_until = engine.censor_cutoff(metric)
-        designs = [plan["design"]] + [d for d in ("did", "treated", "before_after") if d != plan["design"]]
-        for d in designs:
-            ev = _run_design(log, d, pm, pw, rollout[0], censored_until)
-            e = effect(ev)
-            if e is None:
-                continue
-            if eff is None and d == plan["design"]:
-                eff = e
-            else:
-                tri.append(e)
-        if eff is None and tri:  # planned design had no data; fall back to the next one
-            eff = tri.pop(0)
+        eff, tri = _measure(log, plan["design"], pm, pw, rollout[0], censored_until)
+        if eff is None and pw:  # plan repair: a filter may have removed the whole comparison group
+            for dim in sorted(pw, key=lambda d: not d.endswith("_id")):  # ID-like filters are the usual cause
+                trial = {k: v for k, v in pw.items() if k != dim}
+                eff, tri = _measure(log, plan["design"], pm, trial, rollout[0], censored_until)
+                if eff:
+                    warnings.append(f"Plan repair: dropped filter {dim}={pw[dim]!r}; it left no comparison group "
+                                    f"(it only matches AI-exposed records).")
+                    pw = plan["primary"]["where"] = trial
+                    for g in plan["guardrails"]:
+                        g["where"].pop(dim, None)
+                    step("Plan repair", warnings[-1])
+                    break
         if metric.has_treated and eff and eff["design"] != "treated":
             level_ev = engine.level(log, pm, pw, start=rollout[0], treated=True, end=censored_until,
                                     label="AI-assisted records after rollout")

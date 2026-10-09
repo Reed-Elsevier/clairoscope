@@ -147,6 +147,8 @@ set `AUDITOR_FALLBACK_MODEL` to retry declined requests on another model.
 | `Access denied to <model>` | Enable model access in the Bedrock console; check IAM permissions above |
 | `Model '<id>' not found` | Wrong ID for the region or API; try `AUDITOR_BEDROCK_API=invoke` with an inference-profile ID |
 | `Cannot reach the endpoint` | Network/proxy, or a region without the endpoint |
+| `Credential should be scoped to a valid region` | Bedrock API keys are region-bound: set `AWS_REGION` to the key's region (ours: `ap-southeast-2`) |
+| `not available for this account` / 404 on every `anthropic.*` ID | Account only has InvokeModel models: use `global.anthropic.claude-opus-4-6-v1` (verified working for our team) |
 
 Alternatives (same code path): `AUDITOR_LLM=claude` with `ANTHROPIC_API_KEY`, or `AUDITOR_LLM=openai` with
 `OPENAI_API_KEY`. With no provider the app runs in **deterministic mode**, labelled in the UI.

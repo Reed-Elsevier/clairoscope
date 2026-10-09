@@ -72,3 +72,14 @@ def test_override_with_reason_is_flagged_as_contested():
 def test_invented_numbers_are_caught():
     r = run_audit("UC0002", llm=FakeLLM(GOOD_PLAN, _verdict("TRADE-OFF", text="QA pass fell to 37.4%.")))
     assert "37.4" in " ".join(r["grounding"]["unverified"])
+
+
+def test_plan_repair_drops_filter_that_removes_comparison_group():
+    # Seen live on Bedrock: the planner filtered on the AI's own model_id, leaving no non-AI records.
+    w = [{"dim": "task_type", "value": "Classify"}, {"dim": "model_id", "value": "MDL0096"}]
+    plan = dict(GOOD_PLAN, primary={"metric": "legal_minutes", "where": w},
+                guardrails=[{"metric": "legal_qa_pass", "where": w, "why": "QA failures"}])
+    r = run_audit("UC0002", llm=FakeLLM(plan, _verdict("TRADE-OFF")))
+    assert r["plan"]["primary"]["where"] == {"task_type": "Classify"}
+    assert any("Plan repair" in w for w in r["plan_warnings"])
+    assert r["rubric"]["verdict"] == "TRADE-OFF"

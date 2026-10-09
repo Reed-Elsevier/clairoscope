@@ -4,7 +4,7 @@ from __future__ import annotations
 import altair as alt
 import pandas as pd
 import streamlit as st
-from dotenv import load_dotenv
+from auditor.config import load_env
 
 from auditor import ledger
 from auditor.agent import run_audit
@@ -16,7 +16,7 @@ from auditor.judge import LEVEL_GAP_HIGH, SUPPORT_RATIO
 from auditor.llm import get_llm
 from auditor.memo import decision_memo
 
-load_dotenv()
+load_env()
 st.set_page_config(page_title="AI Value Auditor", page_icon=":mag:", layout="wide")
 
 VERDICT_STYLE = {

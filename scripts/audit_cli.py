@@ -11,7 +11,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from dotenv import load_dotenv  # noqa: E402
+from auditor.config import load_env  # noqa: E402
 
 from auditor.agent import run_audit  # noqa: E402
 from auditor.llm import get_llm  # noqa: E402
@@ -35,7 +35,7 @@ def show(r: dict, verbose: bool) -> None:
 
 
 def main() -> None:
-    load_dotenv()
+    load_env()
     ap = argparse.ArgumentParser()
     ap.add_argument("use_case", nargs="?")
     ap.add_argument("--all-flagship", action="store_true")

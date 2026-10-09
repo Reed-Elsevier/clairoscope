@@ -12,7 +12,7 @@ ROOT = Path(__file__).resolve().parent.parent
 
 
 def data_dir() -> Path:
-    return Path(os.environ.get("AUDITOR_DATA_DIR", ROOT / "data"))
+    return Path(os.environ.get("AUDITOR_DATA_DIR", "").strip() or ROOT / "data")
 
 
 @lru_cache(maxsize=1)

@@ -9,7 +9,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from dotenv import load_dotenv  # noqa: E402
+from auditor.config import load_env  # noqa: E402
 
 from auditor.llm import LLMError, configured_provider, get_llm  # noqa: E402
 
@@ -19,7 +19,7 @@ SCHEMA = {"type": "object", "additionalProperties": False, "required": ["status"
 
 
 def main() -> int:
-    load_dotenv()
+    load_env()
     provider = configured_provider()
     print(f"Provider: {provider}")
     if provider == "off":
