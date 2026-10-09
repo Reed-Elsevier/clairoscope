@@ -1,4 +1,4 @@
-/* AI Value Auditor: an auditor's working paper. Ledger-pad paper, blue-black ink, audit-red marks.
+/* Clairoscope: an auditor's working paper. Ledger-pad paper, blue-black ink, audit-red marks.
    One bold element: the verdict stamp. Everything else stays quiet. */
 @font-face {
   font-family: "Public Sans"; font-style: normal; font-weight: 100 900; font-display: swap;
@@ -60,8 +60,7 @@ main { max-width: 960px; margin: 0 auto; padding: 0 20px 56px; }
 }
 .wordmark { display: inline-flex; align-items: center; gap: 8px; color: var(--ink); text-decoration: none;
   font-weight: 800; font-size: 1.05rem; letter-spacing: -.01em; }
-.wordmark svg { width: 22px; height: 22px; fill: none; stroke: var(--audit); stroke-width: 4;
-  stroke-linecap: round; stroke-linejoin: round; }
+.wordmark img { width: 28px; height: 28px; display: block; }
 .ai-status { display: inline-flex; align-items: center; gap: 8px; background: none; border: 0; padding: 6px 2px;
   cursor: pointer; color: var(--pencil); font-size: .9rem; }
 .ai-status:hover .txt { text-decoration: underline; }
@@ -79,7 +78,8 @@ main { max-width: 960px; margin: 0 auto; padding: 0 20px 56px; }
 
 /* ask */
 .ask { padding: 28px 0 32px; }
-.ask-title { font-size: 1.15rem; margin-bottom: 12px; }
+.ask-title { font-size: 1.15rem; margin-bottom: 4px; }
+.ask-sub { color: var(--pencil); margin-bottom: 12px; max-width: 68ch; }
 .ask-row { display: flex; gap: 10px; }
 .ask-row input {
   flex: 1; min-width: 0; font: inherit; padding: 13px 14px; color: var(--ink); background: var(--sheet);
@@ -150,6 +150,10 @@ main { max-width: 960px; margin: 0 auto; padding: 0 20px 56px; }
   font-variant-numeric: tabular-nums; color: var(--tone); }
 .who { font-size: .92rem; color: var(--pencil); margin-bottom: 6px; }
 .metric-name { margin-top: 14px; font-weight: 700; }
+.designed { display: inline-block; margin-left: 8px; padding: 1px 8px; font-size: .8rem; font-weight: 600;
+  color: var(--cost); border: 1.5px solid currentColor; border-radius: 3px; }
+.design-box { border-left: 3px solid var(--cost); padding: 4px 0 4px 14px; margin: 10px 0; }
+.design-box p { margin: 4px 0; }
 .how { margin-top: 6px; color: var(--pencil); font-size: .9rem; max-width: 70ch; }
 
 .change { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 16px; align-items: baseline;
@@ -228,6 +232,7 @@ details > summary::marker { color: var(--audit); }
   cursor: pointer; }
 .ledger-row:hover { background: var(--sheet); }
 .ledger-row .name { font-weight: 700; }
+.ledger-row .terms { display: block; font-weight: 400; font-size: .8rem; color: var(--pencil); margin-top: 2px; }
 .ledger-row .what { color: var(--pencil); font-size: .92rem; }
 .ledger-row .verdict { font-weight: 800; color: var(--tone); font-size: .95rem; }
 .num { text-align: right; font-variant-numeric: tabular-nums; }

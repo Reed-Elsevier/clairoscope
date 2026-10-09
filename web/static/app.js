@@ -1,4 +1,4 @@
-// AI Value Auditor front end. No framework, no CDN: works inside a locked-down AWS network.
+// Clairoscope front end. No framework, no CDN: works inside a locked-down AWS network.
 const $ = (sel, el = document) => el.querySelector(sel);
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const money = (n) => "$" + Math.round(n || 0).toLocaleString("en-US");
@@ -17,6 +17,7 @@ const STEP_LABELS = {
   "Load facts": "Reading the project record",
   "Plan": "Designing a fair test",
   "Plan repair": "Adjusting the test",
+  "Design measure": "Designing a measure from the data dictionary",
   "Measure": "Measuring in operations data",
   "Hidden costs": "Looking for hidden costs",
   "Confounder hunt": "Checking what else changed at the time",
@@ -48,6 +49,7 @@ async function init() {
   const [cfg, ucs] = await Promise.all([api("/api/config"), api("/api/use-cases")]);
   renderLlm(cfg.llm);
   state.useCases = ucs;
+  $("#uc-count").textContent = ucs.length.toLocaleString("en-US");
   $("#uc-list").innerHTML = ucs.map((u) => `<option value="${esc(u.name)} (${esc(u.id)})">${esc(u.stage)}${u.flagship ? ", flagship" : ""}</option>`).join("");
   loadOverview();
   const deep = new URLSearchParams(location.search).get("uc");
@@ -174,15 +176,16 @@ function renderResult(res) {
   el.innerHTML = `
     <header class="finding-head">
       <p class="project-line">${esc(u.name)}, project ${esc(u.use_case_id)}.
-        ${u.division ? `${esc(u.division)}, ` : ""}${esc(String(u.stage || "").toLowerCase())} stage.</p>
+        ${u.division ? `${esc(u.division)}, ` : ""}${esc(String(u.stage || "").toLowerCase())} stage.
+        ${(v.terms || []).map(esc).join(" ")}</p>
       <h2 class="answer">${esc(v.answer)}</h2>
       <p class="headline">${esc(v.headline)}</p>
       ${v.claim_text ? `<p class="headline">Claim checked: “${esc(v.claim_text)}”</p>` : ""}
       ${v.ai_note ? `<p class="note">${esc(v.ai_note)}</p>` : ""}
-      ${v.contested ? `<p class="note">Claude disagreed with the rule-based verdict. The evidence below shows both sides.</p>` : ""}
+      ${v.contested ? `<p class="note">Claude disagrees with this verdict: ${esc(v.contested_reason)} Treat the result as unsettled until an analyst reviews the evidence below.</p>` : ""}
     </header>
     <div class="stamp land" aria-label="Verdict: ${esc(v.verdict_label)}">${esc(v.verdict_label)}<small>Checked ${esc(today)}</small></div>
-    ${comparisonPart(v.comparison)}
+    ${comparisonPart(v.comparison, v.no_test_reason, v.designed_measure)}
     ${costsPart(v.hidden_costs)}
     ${checksPart(v.checks)}
     ${moneyPart(v.value)}
@@ -201,19 +204,19 @@ function bar(value, max, cls) {
   return `<div class="bar ${cls}"><span style="width:${w.toFixed(1)}%"></span></div>`;
 }
 
-function comparisonPart(c) {
+function comparisonPart(c, reason, designed) {
   if (!c) return `<section class="part"><h3>What they said, and what we found</h3>
-    <p class="part-text pencil">No operations data can test this claim yet.</p></section>`;
+    <p class="part-text">${reason ? "We can't measure this project yet. " + esc(reason) : "No operations data can test this claim yet."}</p></section>`;
   const level = c.kind === "level";
   const better = c.higher_is_better ? c.after_raw > c.before_raw : c.after_raw < c.before_raw;
   const max = Math.max(Math.abs(c.before_raw || 0), Math.abs(c.after_raw || 0));
   return `<section class="part">
     <h3>${level ? "What they reported, and what the data shows" : "What they said, and what we found"}</h3>
     <div class="said-found">
-      <div class="said"><div class="who">${level ? "They reported" : "They said"}</div><div class="fig">“${esc(c.said)}”</div></div>
-      <div class="found"><div class="who">${level ? "Operations data shows" : "We found"}</div><div class="fig">${esc(c.found)}</div></div>
+      <div class="said"><div class="who">${level ? "They reported" : "They said"}${c.said_metric ? `, about ${esc(c.said_metric.toLowerCase())}` : ""}</div><div class="fig">“${esc(c.said)}”</div></div>
+      <div class="found"><div class="who">${level ? "Operations data shows" : "We found"}${c.said_metric ? `, in ${esc(c.metric.toLowerCase())}` : ""}</div><div class="fig">${esc(c.found)}</div></div>
     </div>
-    <p class="metric-name">${esc(c.metric)}</p>
+    <p class="metric-name">${esc(c.metric)}${designed ? ` <span class="designed">Measure designed by Claude from the ${esc(designed.table.replace(/_/g, " "))} records</span>` : ""}</p>
     <div class="change"><span class="pencil">${level ? "Reported" : "Without AI"}</span><span class="vals">${esc(c.before)}</span>
       <div class="bars">${bar(c.before_raw, max, "")}</div></div>
     <div class="change"><span class="pencil">${level ? "Actual" : "With AI"}</span><span class="vals">${esc(c.after)}</span>
@@ -232,7 +235,7 @@ function costsPart(costs) {
       return `<div class="change"><span class="label">${esc(h.label)}</span>
         <span class="vals"><span class="was">${esc(h.before)}</span> to <span class="now">${esc(h.after)}</span></span>
         <div class="bars">${bar(h.before_raw, max, "")}${bar(h.after_raw, max, "worse")}</div>
-        ${h.severity === "major" ? `<span class="serious">A serious drop: this needs fixing before any rollout.</span>` : ""}</div>`;
+        ${h.note ? `<span class="serious">${esc(h.note)}</span>` : ""}</div>`;
     }).join("")}</section>`;
 }
 
@@ -261,7 +264,7 @@ function decisionPart(auditId, recommended) {
     <div class="options" role="group" aria-label="Decision">${DECISIONS.map(([k, label]) =>
       `<button type="button" class="opt" data-k="${k}" aria-pressed="${k === recommended}">${esc(label)}${k === recommended ? ' <span class="rec">(recommended)</span>' : ""}</button>`).join("")}</div>
     <div class="fields">
-      <input id="reviewer" value="AI CoE portfolio lead" aria-label="Your role">
+      <input id="reviewer" value="AI portfolio lead" aria-label="Your role">
       <textarea id="note" rows="2" placeholder="Why this decision, and what must happen next?" aria-label="Note"></textarea>
     </div>
     <div class="actions"><button type="button" class="btn-ink" id="save-decision">Save decision</button>
@@ -294,6 +297,7 @@ function evidencePart(r) {
     <h4>Why this verdict</h4><ul>${r.rubric.reasons.map((x) => `<li>${esc(x)}</li>`).join("")}</ul>
     ${r.traps.length ? `<h4>Evidence traps</h4><ul>${r.traps.map((t) => `<li><strong>${esc(t.title)}</strong> (${esc(t.severity)}): ${esc(t.detail)} <span class="pencil">${esc(t.reference || "")}</span></li>`).join("")}</ul>` : ""}
     <h4>Test design</h4><p>${esc(plan.planner || "")}: ${esc(plan.rationale || "")}</p>
+    ${designPart(r.measure_design)}
     ${(r.plan_warnings || []).map((w) => `<p class="pencil">${esc(w)}</p>`).join("")}
     <p class="pencil">Text written by Claude: ${g.verified ?? 0} of ${g.numbers_checked ?? 0} numbers matched the evidence${g.unverified && g.unverified.length ? ` (unmatched: ${esc(g.unverified.join(", "))})` : ""}. Mode: ${esc(r.mode)}.</p>
     <h4>Evidence receipts (${r.evidence.length})</h4>
@@ -304,13 +308,27 @@ function evidencePart(r) {
   </details>`;
 }
 
+function designPart(md) {
+  if (!md) return "";
+  const s = md.spec;
+  return `<div class="design-box"><h4>Measure designed by Claude</h4>
+    <p>${esc(s.label)} (${esc(s.unit)}, ${s.higher_is_better ? "higher is better" : "lower is better"}), from <strong>${esc(s.table)}</strong>.</p>
+    <p>${esc(s.why)}</p>
+    ${s.assumptions.length ? `<p class="pencil">Assumes: ${esc(s.assumptions.join(" "))}</p>` : ""}
+    <p class="pencil">Tables retrieved from the data dictionary: ${esc(md.retrieved_tables.map(([t, sc]) => `${t} (${sc})`).join(", "))}.</p>
+    <p class="pencil">Checks passed before measuring: safe SQL only, every column exists, ${Number(md.counts.n).toLocaleString("en-US")} records,
+      comparisons possible: ${esc(md.designs.join(", "))}. ${esc(md.notes.join(" "))}</p>
+    <p class="pencil">Pre-registered ${esc(md.registered_at)}, fingerprint ${esc(md.sha256.slice(0, 16))}…, ${md.attempts} attempt${md.attempts > 1 ? "s" : ""}.</p>
+    <details><summary class="pencil">SQL</summary><pre>${esc(md.sql)}</pre></details></div>`;
+}
+
 async function drawSeries(r) {
   const box = $("#series");
   const plan = r.plan, eff = r.primary_effect;
   if (!plan) { box.textContent = "No measure to chart."; return; }
   const group = eff && eff.design === "did" ? "adopter" : eff && eff.design === "treated" ? "treated" : "";
   try {
-    const q = new URLSearchParams({ metric: plan.primary.metric, where: JSON.stringify(plan.primary.where || {}) });
+    const q = new URLSearchParams({ metric: plan.primary.metric, where: JSON.stringify(plan.primary.where || {}), audit_id: r.audit_id });
     if (group) q.set("group", group);
     const s = await api(`/api/series?${q}`);
     box.classList.remove("pencil");
@@ -361,14 +379,15 @@ async function loadOverview() {
   $("#hero-line").innerHTML = `Project teams say their AI earns <span class="fig">${money(o.reported_total)}</span> a year.
     The data backs <span class="fig backed">${money(o.supported_total)}</span> of it.`;
   $("#hero-sub").textContent = `${o.holding_up} of the ${n} flagship claims hold up when tested against operations data. ` +
-    "Each figure below is measured, not taken from what the teams report.";
+    "“Reported” is what each project team entered in the AI portfolio. “Backed” is the part we could confirm from " +
+    "day-to-day work records such as support cases, legal tasks and invoices.";
 
   $("#ledger").innerHTML = `
     <div class="ledger-head" aria-hidden="true"><span>Project</span><span>What we found</span><span>Verdict</span>
       <span class="num">Reported a year</span><span class="num">Backed a year</span></div>
     <ul class="ledger-rows">${o.flagships.map((f) => `<li>
       <button type="button" class="ledger-row tone-${f.color}" data-id="${esc(f.use_case_id)}" aria-label="Open the check for ${esc(f.name)}">
-        <span class="name">${esc(f.name)}</span>
+        <span class="name">${esc(f.name)}${(f.terms || []).length ? `<small class="terms">${f.terms.map(esc).join(" ")}</small>` : ""}</span>
         <span class="what">${esc(f.headline)}</span>
         <span class="verdict">${esc(f.verdict_label)}</span>
         <span class="num" data-label="Reported">${money(f.reported)}</span>

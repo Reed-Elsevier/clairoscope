@@ -3,17 +3,18 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>AI Value Auditor</title>
-  <meta name="description" content="Checks whether AI projects deliver what their teams claim, using operations data.">
-  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%23EDF1EA'/%3E%3Cpath d='M7 17.5l6 6L25 8' stroke='%23B3261E' stroke-width='4' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
+  <title>Clairoscope</title>
+  <meta name="description" content="Clairoscope checks whether AI projects deliver what their teams claim, using operations data.">
+  <link rel="icon" type="image/png" sizes="32x32" href="/static/favicon-32.png">
+  <link rel="apple-touch-icon" href="/static/apple-touch-icon.png">
   <link rel="preload" href="/static/fonts/public-sans.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="stylesheet" href="/static/styles.css">
 </head>
 <body>
   <header class="masthead">
     <a class="wordmark" href="/">
-      <svg viewBox="0 0 32 32" aria-hidden="true"><path d="M7 17.5l6 6L25 8"/></svg>
-      AI Value Auditor
+      <img src="/static/icon-64.png" alt="" width="28" height="28">
+      Clairoscope
     </a>
     <button id="ai-status" class="ai-status" type="button" aria-describedby="ai-help">
       <span class="dot" aria-hidden="true"></span><span class="txt">Connecting to Claude</span>
@@ -27,7 +28,9 @@
     </section>
 
     <section class="ask" aria-labelledby="ask-title">
-      <h2 id="ask-title" class="ask-title">Check a project or a claim</h2>
+      <h2 id="ask-title" class="ask-title">Check any of the <span id="uc-count">600</span> AI projects</h2>
+      <p class="ask-sub">Every project in the AI portfolio can be checked, not just the eight below. Type a project name
+        or ID, or paste what a team claims.</p>
       <form id="ask-form" class="ask-row">
         <input id="ask-input" list="uc-list" autocomplete="off"
                placeholder="A project name, an ID like UC0002, or a claim such as “The legal classifier cut handling time by 43%”"
@@ -50,7 +53,7 @@
 
     <section id="overview" class="ledger-section" aria-labelledby="ledger-title">
       <h2 id="ledger-title">The eight flagship claims</h2>
-      <p class="pencil">Select a project to see the full check.</p>
+      <p class="pencil">Select one to see its full check. The other 592 projects can be checked with the search box above.</p>
       <div id="ledger" class="ledger"><p class="pencil">Loading…</p></div>
       <p id="portfolio" class="portfolio"></p>
       <details class="more">

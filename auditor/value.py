@@ -64,9 +64,9 @@ def pilot_charter(uc: dict, plan: dict | None, rub: dict) -> dict | None:
                   f"stddev_samp(value) as sd from b where ts >= ?", params + [since]).iloc[0]
     per_month, mean, sd = float(stats["per_month"] or 0), float(stats["mean"] or 0), float(stats["sd"] or 0)
     claimed = rub.get("claimed_rel")
-    target_rel = abs(claimed) * 0.5 if claimed else 0.05
+    target_rel = abs(claimed) * 0.5 if claimed and math.isfinite(claimed) else 0.05  # no usable claim: 5%
     sesoi = target_rel * abs(mean) if mean else None
-    if not sesoi or not sd:
+    if not sesoi or not sd or not math.isfinite(sesoi) or not math.isfinite(sd):
         return None
     n_arm = math.ceil(2 * (Z95 + Z80POWER) ** 2 * sd ** 2 / sesoi ** 2)
     # at least 2 months so a novelty effect can wear off before the decision

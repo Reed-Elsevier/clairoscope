@@ -1,4 +1,4 @@
-# AI Value Auditor: one container (FastAPI + static UI). Runs on EC2 or ECS Fargate.
+# Clairoscope: one container (FastAPI + static UI). Runs on EC2 or ECS Fargate.
 # Data: either build with ./data present (it is copied in), or set AUDITOR_DATA_S3_URI at runtime.
 FROM python:3.12-slim
 

@@ -4,7 +4,7 @@
 set -euo pipefail
 
 REGION="${REGION:-ap-southeast-2}"
-REPO="${REPO:-ai-value-auditor}"
+REPO="${REPO:-clairoscope}"
 TAG="${TAG:-latest}"
 ACCOUNT="$(aws sts get-caller-identity --query Account --output text)"
 REGISTRY="$ACCOUNT.dkr.ecr.$REGION.amazonaws.com"

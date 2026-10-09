@@ -1,7 +1,8 @@
 """The audit agent: plan (LLM) -> execute (code) -> investigate (LLM picks follow-ups) -> verdict (LLM),
 with deterministic guards around every LLM step:
 
-  * plans are validated against the metric catalog (the LLM never writes SQL),
+  * plans are validated against the metric catalog; measures Claude designs for uncovered projects are
+    validated, attributed and fingerprinted by measure_builder.py before anything is measured,
   * numbers in the LLM's text are checked against the evidence log (numeric grounding),
   * the LLM cannot silently change the rubric verdict; an override must carry a stated reason.
 
@@ -9,6 +10,7 @@ With no LLM configured the same pipeline runs with registered plans and template
 """
 from __future__ import annotations
 
+import dataclasses
 import json
 import math
 import re
@@ -17,7 +19,7 @@ import uuid
 from datetime import date, datetime, timedelta
 from typing import Callable
 
-from . import engine, robustness
+from . import engine, measure_builder, robustness
 from .catalog import METRICS, catalog_for_prompt
 from .engine import EvidenceLog
 from .facts import get_use_case, kpi_higher_is_better, list_use_cases, rollout_date
@@ -38,7 +40,7 @@ _INVESTIGATION = {"type": "object", "additionalProperties": False, "required": [
                                  "where": _FILTERS}}
 PLAN_SCHEMA = {
     "type": "object", "additionalProperties": False,
-    "required": ["hypotheses", "primary", "design", "guardrails", "investigations", "rationale"],
+    "required": ["hypotheses", "primary", "design", "guardrails", "investigations", "rationale", "catalog_fit"],
     "properties": {
         "hypotheses": {"type": "array", "items": {"type": "string"}},
         "primary": {"type": "object", "additionalProperties": False, "required": ["metric", "where"],
@@ -49,6 +51,7 @@ PLAN_SCHEMA = {
             "properties": {"metric": {"type": "string"}, "where": _FILTERS, "why": {"type": "string"}}}},
         "investigations": {"type": "array", "items": _INVESTIGATION},
         "rationale": {"type": "string"},
+        "catalog_fit": {"type": "string", "enum": ["good", "weak", "none"]},
     },
 }
 FOLLOWUP_SCHEMA = {"type": "object", "additionalProperties": False, "required": ["reasoning", "checks"],
@@ -89,7 +92,7 @@ CLAIM_SCHEMA = {
 }
 
 # ---------------------------------------------------------------- prompts
-PLANNER_SYSTEM = """You are the planning stage of an AI Value Auditor for a shared-services center.
+PLANNER_SYSTEM = """You are the planning stage of Clairoscope, an AI value auditor for a shared-services center.
 A team claims its AI use case improved a KPI. Your job is to design a FAIR test of that claim using the
 operational data, not to judge it yet.
 
@@ -106,9 +109,12 @@ Rules:
 - Investigations: up to 3 follow-ups that could explain the result (segment by a dim, compare a related
   population, or look for what changed). Prefer ones that could reveal a confounder or a pocket of harm.
 - Write 2-3 short hypotheses about how the claim could be wrong.
+- catalog_fit: "good" only if the primary metric directly records the work this project changes (same process,
+  same kind of record). "weak" if it is only loosely related, "none" if nothing in the catalog fits. Be strict:
+  a weak or missing fit sends the project to the measure builder, which designs a measure from the full data.
 Return JSON only."""
 
-FOLLOWUP_SYSTEM = """You are the SKEPTIC stage of an AI Value Auditor. Your job is to try to break the emerging
+FOLLOWUP_SYSTEM = """You are the SKEPTIC stage of Clairoscope, an AI value auditor. Your job is to try to break the emerging
 conclusion before a leader acts on it. Read the evidence and ask: what else could explain this result?
 (a pre-existing trend, a different mix of work, one segment driving everything, a tool or vendor change,
 harm hidden in a sub-population, an effect that fades). Request at most 3 checks that would most likely
@@ -116,7 +122,7 @@ OVERTURN the current reading. Use only catalog metrics and dims. In "reasoning",
 alternative explanation in one or two sentences. Return an empty list only if no credible alternative
 remains. Return JSON only."""
 
-VERDICT_SYSTEM = """You are the verdict stage of an AI Value Auditor. Write the audit conclusion for a leader who
+VERDICT_SYSTEM = """You are the verdict stage of Clairoscope, an AI value auditor. Write the audit conclusion for a leader who
 must decide whether to scale, fix, pause or stop this AI use case.
 
 Hard rules:
@@ -127,6 +133,8 @@ Hard rules:
   in override_reason. Otherwise override_reason is "".
 - Name the hidden costs plainly. Mention evidence traps (e.g. KPI measured before pilot) when relevant.
 - Be concise and concrete: headline <= 15 words, summary <= 80 words, 2-5 findings.
+- Write for a non-specialist: plain words, no statistics jargon (no p-values, "diff-in-diff", "pp"), and spell out
+  any acronym the first time you use it, e.g. "customer satisfaction (CSAT)".
 - next_validation_step: the single most useful next measurement to make the verdict more certain.
 Return JSON only."""
 
@@ -299,6 +307,75 @@ def _measure(log: EvidenceLog, design: str, metric: str, where: dict, cutoff: st
     return eff, tri
 
 
+# Catalog AI flags that record one flagship project's AI: REPH Copilot (support cases, only UC0001 uses it), the
+# Knowledge RAG Assistant (search logs, only UC0006), model-based fraud rules (UC0005), the integrity screening
+# tool (UC0007). Any other project measured there must not be credited with (or blamed for) that AI.
+FLAG_OWNER = {"support_cases": "UC0001", "search_logs": "UC0006", "risk_alerts, alert_rules": "UC0005",
+              "research_integrity_flags, research_papers_published": "UC0007"}
+
+
+def _without_ai_groups(key: str) -> str:
+    """Same records and values, but without another project's AI flag or adopter teams."""
+    plain = f"{key}__no_ai_groups"
+    if plain not in METRICS:
+        METRICS[plain] = dataclasses.replace(METRICS[key], key=plain, treated_label=None, adopter_label=None)
+    return plain
+
+
+def _attribute(plan: dict, uc: dict, cutoff: str | None = None) -> tuple[dict | None, list[str], dict | None]:
+    """Measure only this project's own AI. Where records name the model that did the work, keep other AI projects'
+    records out of both groups; if this project's model never appears, its effect cannot be measured there.
+    Where the AI flag belongs to another project, keep only the before/after comparison around this rollout."""
+    warnings: list[str] = []
+    own = uc.get("model_id")
+    for spec in [plan["primary"]] + plan["guardrails"]:
+        m = METRICS[spec["metric"]]
+        owner = FLAG_OWNER.get(m.source)
+        if owner and owner != uc["use_case_id"] and (m.has_treated or m.has_adopter):
+            spec["metric"] = _without_ai_groups(m.key)
+            warnings.append(f"{m.label}: its AI flags record {owner}'s AI, not this project's; "
+                            f"only before vs after this project's rollout is compared.")
+    if any(w.endswith("rollout is compared.") for w in warnings):
+        try:
+            plan, w = validate_plan(plan, cutoff)
+            warnings += w
+        except ValueError as e:
+            warnings.append(str(e))
+            return None, warnings, None
+        if plan["design"] is None:
+            return None, warnings, None
+
+    def attribute(spec: dict) -> str | None:  # returns the other models when the spec cannot be attributed
+        models = engine.ai_models(spec["metric"])
+        if not models:
+            return None
+        if own in models:
+            spec["where"].pop("model_id", None)  # a model filter would also remove the manual comparison group
+            spec["where"][engine.AI_MODEL] = own
+            return None
+        return ", ".join(models)
+
+    others = attribute(plan["primary"])
+    if others:
+        label = METRICS[plan["primary"]["metric"]].label
+        trap = {"code": "NOT_ATTRIBUTABLE", "severity": "high",
+                "title": "This project's AI does not appear in the operations data",
+                "detail": f"AI-assisted records for {label.lower()} come only from other AI models ({others}); none "
+                          f"from this project's model {own or '(none on record)'}. Using them would credit or "
+                          f"blame this project for another AI's work.",
+                "evidence_ids": [], "blocks_verdict": True, "reference": "NIST AI RMF MEASURE 2.3"}
+        return None, [trap["detail"]], trap
+    kept = []
+    for g in plan["guardrails"]:
+        others = attribute(g)
+        if others:
+            warnings.append(f"Dropped guardrail {g['metric']}: its AI records come from other models ({others}).")
+        else:
+            kept.append(g)
+    plan["guardrails"] = kept
+    return plan, warnings, None
+
+
 def _claim_date_level(log: EvidenceLog, claim: dict | None, metric_key: str, where: dict,
                       censored_until: str | None):
     """What operations showed in the 90 days either side of the date the KPI was reported.
@@ -383,6 +460,9 @@ def run_audit(use_case_id: str | None = None, claim_text: str | None = None, llm
         raise ValueError(f"Unknown use case {use_case_id}")
     claim = claim_from_parsed(parsed) if parsed else uc.get("claim")
     rollout = rollout_date(uc)
+    not_live = uc["stage"] == "Idea"
+    if not_live:  # nothing runs yet; another tool's usage or another project's AI flag must not stand in for it
+        llm, rollout = None, (None, "not deployed")
     step("Load facts", f"{uc['name']} ({uc['stage']}); rollout {rollout[0]} from {rollout[1]}; "
                        f"{uc['usage']['events']:,} usage events")
 
@@ -399,7 +479,7 @@ def run_audit(use_case_id: str | None = None, claim_text: str | None = None, llm
         except (LLMError, KeyError, TypeError, ValueError) as e:
             planner_note = f"LLM planner failed ({e}); "
             llm_errors.append(str(e))
-    if plan is None:
+    if plan is None and not not_live:
         plan = registered_plan(uc["use_case_id"]) or heuristic_plan(uc)
     warnings: list[str] = []
     if plan:
@@ -413,9 +493,42 @@ def run_audit(use_case_id: str | None = None, claim_text: str | None = None, llm
                 warnings += w2
         if plan and plan["design"] is None:
             plan = None
+    attribution_trap = None
+    if plan:
+        plan, w4, attribution_trap = _attribute(plan, uc, rollout[0])
+        warnings += w4
+
+    # ---- measure builder: Claude designs a measure when the catalog has no good fit for this project
+    measure_design, no_measure_reason = None, None
+    fit = (plan or {}).get("catalog_fit", "good" if plan else "none")
+    if llm and not planner_note and fit in ("weak", "none"):
+        try:
+            built = measure_builder.build(uc, claim, rollout[0], llm)
+            built["plan"], w5 = validate_plan(built["plan"], rollout[0])
+            plan, measure_design, attribution_trap = built["plan"], built["design"], None
+            warnings += w5 + built["design"]["notes"]
+            if claim:  # a designed measure may use other units than the team's KPI: compare changes, not levels
+                claim = dict(claim, generic_kpi=True)
+            spec = measure_design["spec"]
+            step("Design measure", f"Claude designed '{spec['label']}' from {spec['table']} "
+                                   f"(retrieved {len(measure_design['retrieved_tables'])} tables from the data "
+                                   f"dictionary); validated; comparisons possible: {', '.join(measure_design['designs'])}")
+        except measure_builder.BuildError as e:
+            warnings.append(str(e))
+            if isinstance(e, measure_builder.NotFeasible) or fit == "none":
+                plan, no_measure_reason = None, str(e)  # a loosely related catalog measure would mislead
+            step("Design measure", f"no trustworthy measure: {e}")
+        except LLMError as e:
+            llm_errors.append(str(e))
+            step("Design measure", f"skipped ({e})")
+        except Exception as e:  # the builder must never break an audit
+            warnings.append(f"Measure builder failed: {e}")
+            step("Design measure", f"failed ({e})")
     step("Plan", planner_note + (f"{plan['planner']}: primary {plan['primary']['metric']} "
                                  f"{plan['primary']['where'] or ''} via {plan['design']}; guardrails "
-                                 f"{[g['metric'] for g in plan['guardrails']]}" if plan else "no measurable metric"))
+                                 f"{[g['metric'] for g in plan['guardrails']]}" if plan
+                                 else "not measurable: " + attribution_trap["title"].lower() if attribution_trap
+                                 else "no measurable metric"))
 
     # ---- execute
     log = EvidenceLog()
@@ -428,7 +541,7 @@ def run_audit(use_case_id: str | None = None, claim_text: str | None = None, llm
         censored_until = engine.censor_cutoff(metric)
         eff, tri = _measure(log, plan["design"], pm, pw, rollout[0], censored_until)
         if eff is None and pw:  # plan repair: a filter may have removed the whole comparison group
-            for dim in sorted(pw, key=lambda d: not d.endswith("_id")):  # ID-like filters are the usual cause
+            for dim in sorted((d for d in pw if not d.startswith("_")), key=lambda d: not d.endswith("_id")):  # ID-like filters are the usual cause
                 trial = {k: v for k, v in pw.items() if k != dim}
                 eff, tri = _measure(log, plan["design"], pm, trial, rollout[0], censored_until)
                 if eff:
@@ -513,6 +626,17 @@ def run_audit(use_case_id: str | None = None, claim_text: str | None = None, llm
     traps = find_traps(uc, claim, plan, rollout, eff, cp, wc, claim_level_ev, level_ev, censored_until, acc_ev)
     traps += robustness_traps(eff, plan["primary"]["metric"] if plan else None, rob_evs.get("placebo"),
                               rob_evs.get("pre_trend"), rob_evs.get("mix_adjusted"), rob_evs.get("durability"))
+    if attribution_trap:
+        traps.append(attribution_trap)
+    if no_measure_reason:
+        for t in traps:
+            if t["code"] == "NO_MEASURE":
+                t["detail"] = no_measure_reason
+    if not_live:
+        traps = [t for t in traps if t["code"] != "NO_MEASURE"] + [{
+            "code": "NOT_LIVE", "severity": "high", "title": "This project is still an idea",
+            "detail": "It has not been piloted or deployed, so there are no results to verify yet.",
+            "evidence_ids": [], "blocks_verdict": True, "reference": "NIST AI RMF MEASURE 4.3"}]
     rub = rubric(plan, claim, eff, harms, traps, level_ev, claim_level_ev, tri, pwr)
     value = evidence_value(uc, plan, eff, rub)
     charter = pilot_charter(uc, plan, rub)
@@ -553,6 +677,7 @@ def run_audit(use_case_id: str | None = None, claim_text: str | None = None, llm
         "audit_id": uuid.uuid4().hex[:8], "created_at": datetime.now().isoformat(timespec="seconds"),
         "mode": mode, "use_case": uc, "claim": claim, "claim_text": claim_text, "parsed_claim": parsed,
         "rollout": {"date": rollout[0], "source": rollout[1]}, "plan": plan, "plan_warnings": warnings,
+        "measure_design": measure_design,
         "evidence": [e.to_dict() for e in log.items], "primary_effect": eff, "triangulation": tri,
         "harms": harms, "traps": traps, "rubric": rub, "verdict": verdict, "contested": contested,
         "grounding": grounding, "trace": trace, "censored_until": censored_until,

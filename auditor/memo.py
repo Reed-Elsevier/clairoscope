@@ -28,6 +28,18 @@ def decision_memo(r: dict, decision: dict | None = None) -> str:
         "## Findings",
         "",
     ]
+    md = r.get("measure_design")
+    if md:
+        s = md["spec"]
+        lines[-2:-2] = ["## Measure designed by Claude", "",
+                        f"No catalog measure fits this project, so Claude designed one from the data dictionary: "
+                        f"**{s['label']}** ({s['unit']}) from `{s['table']}`. {s['why']}",
+                        f"- Assumptions: {' '.join(s['assumptions']) or 'none stated'}",
+                        f"- Validated before measuring (safe SQL, columns exist, {md['counts']['n']:,} records); "
+                        f"pre-registered {md['registered_at']}, SHA-256 `{md['sha256']}`.",
+                        f"- Comparisons: {', '.join(md['designs'])}. {' '.join(md['notes'])}",
+                        "- **An analyst should confirm this measure before the result is relied on.**",
+                        "", "```sql", md["sql"], "```", ""]
     for f in v["findings"]:
         lines.append(f"- {f['text']} [{', '.join(f['evidence_ids'])}]")
     if v["hidden_costs"]:

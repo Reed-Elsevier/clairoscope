@@ -21,7 +21,7 @@ else
   git clone --depth 1 "$REPO_URL" /opt/auditor
 fi
 cd /opt/auditor
-docker build -t ai-value-auditor .
+docker build -t clairoscope .
 
 mkdir -p /opt/auditor-state && chown 10001 /opt/auditor-state
 docker rm -f auditor 2>/dev/null || true
@@ -31,6 +31,6 @@ docker run -d --name auditor --restart unless-stopped --network host \
   -e AUDITOR_LLM=bedrock -e AUDITOR_BEDROCK_API=invoke -e AUDITOR_BEDROCK_MODEL="$MODEL" -e AUDITOR_EFFORT=medium \
   -e AUDITOR_DATA_S3_URI="$DATA_S3_URI" -e AUDITOR_BASIC_AUTH="$BASIC_AUTH" \
   -v /opt/auditor-state:/app/state \
-  ai-value-auditor
+  clairoscope
 
-echo "AI Value Auditor starting on port 8080 (check: curl localhost:8080/api/health)"
+echo "Clairoscope starting on port 8080 (check: curl localhost:8080/api/health)"

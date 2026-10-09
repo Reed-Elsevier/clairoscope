@@ -3,6 +3,7 @@ as an Evidence item with its SQL and sample record IDs, so it can be traced and 
 from __future__ import annotations
 
 import math
+from functools import lru_cache
 from dataclasses import asdict, dataclass, field
 from datetime import date, timedelta
 
@@ -77,9 +78,16 @@ def _render_sql(sql: str, params: list) -> str:
     return "".join(out)
 
 
+AI_MODEL = "_ai_model"  # attribution filter: manual records plus this project's own AI records only
+
+
 def _base(metric: Metric, where: dict | None) -> tuple[str, list]:
     clauses, params = ["value is not null"], []
     for dim, val in (where or {}).items():
+        if dim == AI_MODEL:  # other AI projects' records must not count for (or against) this one
+            clauses.append("(not coalesce(treated, false) or model_id = ?)")
+            params.append(val)
+            continue
         if dim not in metric.dims:
             raise ValueError(f"'{dim}' is not a dimension of {metric.key}")
         if isinstance(val, (list, tuple)):
@@ -89,6 +97,16 @@ def _base(metric: Metric, where: dict | None) -> tuple[str, list]:
             clauses.append(f'"{dim}" = ?')
             params.append(val)
     return f"select * from ({metric.sql}) b where {' and '.join(clauses)}", params
+
+
+@lru_cache(maxsize=64)
+def ai_models(metric_key: str) -> tuple[str, ...]:
+    """AI models that appear on AI-assisted records of a metric, when the records say which model did the work."""
+    m = METRICS[metric_key]
+    if not (m.has_treated and "model_id" in m.dims):
+        return ()
+    df = query(f"select distinct model_id from ({m.sql}) b where treated and model_id is not null order by 1")
+    return tuple(df["model_id"])
 
 
 def _welch(a: dict, b: dict) -> dict:
@@ -214,6 +232,8 @@ def diff_in_diff(log: EvidenceLog, metric_key: str, cutoff: str | None = None,
     base, params = _base(m, where)
     if cutoff is None:
         med = query(f"with b as ({base}) select median(go_live) as g from b where adopter", params)["g"].iloc[0]
+        if pd.isna(med):  # no adopter records left after the filters
+            return None
         cutoff = str(pd.Timestamp(med).date())
     sql = (f"with b as ({base}) select adopter, (ts >= coalesce(go_live, ?::timestamp)) as post, count(*) as n, "
            f"avg(value) as mean, coalesce(var_samp(value), 0) as var from b group by 1, 2")
@@ -336,8 +356,8 @@ def what_changed(log: EvidenceLog, metric_key: str, month: str, where: dict | No
         if abs(top["delta"]) < 15:
             continue
         # metric for this category vs the rest, over the whole history
-        cmp = query(f"with b as ({base}) select cast(\"{dim}\" as varchar) = ? as is_cat, count(*) as n, "
-                    f"avg(value) as mean from b group by 1", params + [top["cat"]])
+        cmp = query(f"with b as ({base}) select coalesce(cast(\"{dim}\" as varchar) = ?, false) as is_cat, count(*) as n, "
+                    f"avg(value) as mean from b group by 1", params + [str(top["cat"])])
         cm = {bool(r.is_cat): (int(r.n), float(r.mean)) for r in cmp.itertuples()}
         shifts.append({"dim": dim, "category": top["cat"], "share_before": float(top["share_before"]),
                        "share_after": float(top["share_after"]), "delta_pp": float(top["delta"]),

@@ -1,16 +1,16 @@
 {
-  "family": "ai-value-auditor",
+  "family": "clairoscope",
   "requiresCompatibilities": ["FARGATE"],
   "networkMode": "awsvpc",
   "cpu": "1024",
   "memory": "4096",
   "runtimePlatform": {"cpuArchitecture": "X86_64", "operatingSystemFamily": "LINUX"},
   "executionRoleArn": "arn:aws:iam::CHANGE-ME-ACCOUNT:role/ecsTaskExecutionRole",
-  "taskRoleArn": "arn:aws:iam::CHANGE-ME-ACCOUNT:role/ai-value-auditor-task",
+  "taskRoleArn": "arn:aws:iam::CHANGE-ME-ACCOUNT:role/clairoscope-task",
   "containerDefinitions": [
     {
       "name": "auditor",
-      "image": "CHANGE-ME-ACCOUNT.dkr.ecr.ap-southeast-2.amazonaws.com/ai-value-auditor:latest",
+      "image": "CHANGE-ME-ACCOUNT.dkr.ecr.ap-southeast-2.amazonaws.com/clairoscope:latest",
       "essential": true,
       "portMappings": [{"containerPort": 8080, "protocol": "tcp"}],
       "environment": [
@@ -23,12 +23,12 @@
       ],
       "secrets": [
         {"name": "AUDITOR_BASIC_AUTH",
-         "valueFrom": "arn:aws:secretsmanager:ap-southeast-2:CHANGE-ME-ACCOUNT:secret:ai-value-auditor/basic-auth"}
+         "valueFrom": "arn:aws:secretsmanager:ap-southeast-2:CHANGE-ME-ACCOUNT:secret:clairoscope/basic-auth"}
       ],
       "logConfiguration": {
         "logDriver": "awslogs",
         "options": {
-          "awslogs-group": "/ecs/ai-value-auditor",
+          "awslogs-group": "/ecs/clairoscope",
           "awslogs-region": "ap-southeast-2",
           "awslogs-stream-prefix": "auditor",
           "awslogs-create-group": "true"

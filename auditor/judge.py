@@ -290,6 +290,11 @@ def rubric(plan: dict | None, claim: dict | None, primary: dict | None, harms: l
     if supported and fragile:
         supported = False
         reasons.append("The improvement fails a robustness check: " + "; ".join(t["title"] for t in fragile) + ".")
+    confounded = (primary is not None and primary.get("design") == "before_after"
+                  and any(t["code"] == "CONFOUNDER" for t in traps))
+    if supported and confounded:  # with no comparison group, a coinciding change cannot be told apart from the AI
+        supported = False
+        reasons.append("Before vs after has no comparison group, and something other than the AI moved this metric.")
     ruled_out = bool(pw and pw["equivalent"] and claim_is_improvement and not supported)
     strength = None
     if pw:

@@ -45,8 +45,8 @@ def get_use_case(use_case_id: str) -> dict | None:
         "hours_saved_annual": float(r["hours_saved_annual"] or 0),
     }
     kpi = query("select * from ai_use_case_kpis where use_case_id = ? order by measured_date desc limit 1", [use_case_id])
-    if not kpi.empty:
-        k = kpi.iloc[0]
+    if not kpi.empty and pd.notna(kpi.iloc[0]["current_value"]) and pd.notna(kpi.iloc[0]["baseline_value"]):
+        k = kpi.iloc[0]  # a KPI without a result (ideas only have a baseline) is not a claim
         uc["claim"] = {"kpi_name": k["kpi_name"], "baseline": float(k["baseline_value"]),
                        "current": float(k["current_value"]), "measured_date": _d(k["measured_date"]),
                        "source": f"ai_use_case_kpis.{k['kpi_id']}",

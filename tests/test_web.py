@@ -26,7 +26,7 @@ def _wait(client, path, cond, timeout=120):
 def test_web_flow():
     with TestClient(app) as c:
         assert c.get("/api/health").json()["status"] == "ok"
-        assert "AI Value Auditor" in c.get("/").text
+        assert "Clairoscope" in c.get("/").text
         assert len(c.get("/api/use-cases").json()) == 600
 
         ov = _wait(c, "/api/overview", lambda b: b.get("ready"))

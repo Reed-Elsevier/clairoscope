@@ -74,12 +74,22 @@ def test_invented_numbers_are_caught():
     assert "37.4" in " ".join(r["grounding"]["unverified"])
 
 
-def test_plan_repair_drops_filter_that_removes_comparison_group():
-    # Seen live on Bedrock: the planner filtered on the AI's own model_id, leaving no non-AI records.
+def test_own_model_filter_becomes_attribution():
+    # Seen live on Bedrock: the planner filtered on the AI's own model_id, which also removed the non-AI records.
     w = [{"dim": "task_type", "value": "Classify"}, {"dim": "model_id", "value": "MDL0096"}]
     plan = dict(GOOD_PLAN, primary={"metric": "legal_minutes", "where": w},
                 guardrails=[{"metric": "legal_qa_pass", "where": w, "why": "QA failures"}])
     r = run_audit("UC0002", llm=FakeLLM(plan, _verdict("TRADE-OFF")))
-    assert r["plan"]["primary"]["where"] == {"task_type": "Classify"}
-    assert any("Plan repair" in w for w in r["plan_warnings"])
+    assert r["plan"]["primary"]["where"] == {"task_type": "Classify", "_ai_model": "MDL0096"}
     assert r["rubric"]["verdict"] == "TRADE-OFF"
+
+
+def test_other_projects_ai_records_are_not_borrowed():
+    # Seen live: UC0423 (model MDL0037) was measured on legal tasks done by other AI models and blamed for
+    # UC0002's quality drop. Its own model has no AI-assisted records, so it must be reported as not measurable.
+    plan = dict(GOOD_PLAN, primary={"metric": "legal_minutes", "where": []},
+                guardrails=[{"metric": "legal_qa_pass", "where": [], "why": "QA failures"}])
+    r = run_audit("UC0423", llm=FakeLLM(plan, _verdict("UNPROVEN")))
+    assert r["plan"] is None and r["harms"] == []
+    assert any(t["code"] == "NOT_ATTRIBUTABLE" for t in r["traps"])
+    assert r["rubric"]["verdict"] == "UNPROVEN" and r["value"]["supported_usd"] == 0

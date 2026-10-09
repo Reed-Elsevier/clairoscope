@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import json
 import os
+import random
 import re
 import time
 from pathlib import Path
@@ -142,7 +143,9 @@ class ClaudeLLM:
             oc["format"] = {"type": "json_schema", "schema": schema}
         if oc:
             kwargs["output_config"] = oc
-        for _ in range(3):
+        attempts, throttled = 0, 0
+        while attempts < 3:
+            attempts += 1
             try:
                 if not self.bedrock and "output_config" in kwargs:
                     try:  # Anthropic server-side refusal fallback; plain call if the account lacks the beta
@@ -174,7 +177,14 @@ class ClaudeLLM:
             except a.NotFoundError as e:
                 raise LLMError(f"Model '{kwargs['model']}' not found in {getattr(self, 'region', 'this account')}.") from e
             except a.RateLimitError as e:
-                raise LLMError("Rate limited; retry in a minute.") from e
+                if throttled < 4:  # Bedrock throttles bursts: back off and retry instead of failing the audit
+                    retry_after = (e.response.headers.get("retry-after") if getattr(e, "response", None) else None)
+                    time.sleep(float(retry_after) if retry_after and retry_after.isdigit()
+                               else min(20.0, 2.5 * 2 ** throttled) + random.random())
+                    throttled += 1
+                    attempts -= 1
+                    continue
+                raise LLMError("Rate limited by the model provider even after retrying; try again in a minute.") from e
             except a.APIStatusError as e:
                 raise LLMError(f"API error {e.status_code}: {e.message}") from e
             except a.APIConnectionError as e:

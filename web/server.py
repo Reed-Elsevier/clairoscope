@@ -1,4 +1,4 @@
-"""AI Value Auditor web API + single-page UI.
+"""Clairoscope web API + single-page UI.
 
 Run locally:  python -m uvicorn web.server:app --port 8080
 In AWS:       see Dockerfile and deploy/ (EC2 or ECS Fargate)
@@ -26,6 +26,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from auditor import ledger
+from auditor import measure_builder
 from auditor.agent import run_audit
 from auditor.catalog import METRICS
 from auditor.config import load_env
@@ -34,7 +35,7 @@ from auditor.engine import monthly
 from auditor.facts import get_use_case, list_use_cases, portfolio, portfolio_flags
 from auditor.llm import configured_provider, get_llm
 from auditor.memo import decision_memo
-from auditor.plain import build_view
+from auditor.plain import build_view, terms_in
 
 load_env()
 STATIC = Path(__file__).parent / "static"
@@ -51,7 +52,7 @@ async def lifespan(_: FastAPI):
     yield
 
 
-app = FastAPI(title="AI Value Auditor", docs_url="/api/docs", openapi_url="/api/openapi.json", lifespan=lifespan)
+app = FastAPI(title="Clairoscope", docs_url="/api/docs", openapi_url="/api/openapi.json", lifespan=lifespan)
 app.mount("/static", StaticFiles(directory=STATIC), name="static")
 
 _pool = ThreadPoolExecutor(max_workers=int(os.environ.get("AUDITOR_WORKERS", "4")))
@@ -110,7 +111,7 @@ async def basic_auth(request: Request, call_next):
         header = request.headers.get("authorization", "")
         given = base64.b64decode(header[6:]).decode("utf-8", "replace") if header.startswith("Basic ") else ""
         if not secrets.compare_digest(given, creds):
-            return Response(status_code=401, headers={"WWW-Authenticate": 'Basic realm="AI Value Auditor"'})
+            return Response(status_code=401, headers={"WWW-Authenticate": 'Basic realm="Clairoscope"'})
     return await call_next(request)
 
 
@@ -122,6 +123,7 @@ def _build_overview() -> None:
         v = build_view(r)
         rows.append({"use_case_id": uc_id, "name": r["use_case"]["name"], "stage": r["use_case"]["stage"],
                      "verdict": v["verdict"], "verdict_label": v["verdict_label"], "color": v["color"],
+                     "terms": terms_in(r["use_case"]["name"]),
                      "headline": v["tagline"], "reported": v["value"]["reported_raw"],
                      "supported": v["value"]["supported_raw"]})
     df = portfolio_flags(portfolio())
@@ -269,7 +271,11 @@ def history():
 
 
 @app.get("/api/series")
-def series(metric: str, where: str = "{}", group: str | None = None):
+def series(metric: str, where: str = "{}", group: str | None = None, audit_id: str | None = None):
+    if metric not in METRICS and audit_id:  # a Claude-designed measure from before a restart
+        report = ledger.load_report(audit_id)
+        if report and report.get("measure_design"):
+            measure_builder.restore(report["measure_design"])
     if metric not in METRICS:
         raise HTTPException(400, "Unknown metric")
     try:

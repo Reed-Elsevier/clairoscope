@@ -1,4 +1,6 @@
-# AI Value Auditor
+# Clairoscope
+
+*An AI value auditor: see clearly what your AI projects really deliver.*
 
 **Give it an AI project's claim. An agent designs a fair test, runs it on the Center's operational data,
 tries to break its own conclusion, and returns an evidence-backed verdict, including the hidden costs
@@ -35,9 +37,9 @@ Reproduce with `python scripts/audit_cli.py --all-flagship --no-llm` (determinis
 
 | Criterion | Weight | How the prototype answers it |
 |---|---|---|
-| **Working prototype** | 35% | Live web app on AWS: pick any of 600 use cases *or type a claim* → progress streams in plain words → verdict a non-analyst understands at a glance → human decision → memo. Any judge input works (no scripted path). If the LLM is unreachable it says so and falls back to rule-based mode. 15 automated tests. |
+| **Working prototype** | 35% | Live web app on AWS: pick any of 600 use cases *or type a claim* → progress streams in plain words → verdict a non-analyst understands at a glance → human decision → memo. Any judge input works (no scripted path). If the LLM is unreachable it says so and falls back to rule-based mode. 29 automated tests. |
 | **Business impact & value** | 25% | Answers the brief's central question ("what is really working?"). Converts each verdict into **evidence-supported $** and verified staff-hours, a portfolio red-flag screen over all 600 use cases, and a **pilot charter** that tells leaders how to validate the next step. |
-| **AI utilisation** | 15% | Claude plans a counterfactual test, chooses hidden costs to watch, **argues against its own conclusion** (skeptic stage), and writes the verdict. AI does the judgement; code does the arithmetic. |
+| **AI utilisation** | 15% | Claude does the work an analyst does by hand: for any of the 600 projects it **searches the data dictionary and designs the measurement** when no standard one fits (the measure builder), plans a fair test, chooses hidden costs to watch, **argues against its own conclusion** (skeptic stage) and explains the verdict in plain words. Code validates every design and does all the arithmetic. |
 | **Technical feasibility** | 15% | Small, readable Python package; FastAPI + dependency-free web UI; DuckDB over Parquet; LLM output schema-validated; numeric grounding check; rubric guard; Bedrock via IAM role or bearer token; one Docker image with EC2 and ECS Fargate recipes ([deploy/](deploy/DEPLOY.md)). |
 | **Presentation** | 10% | First screen answers "does it work, should we scale it, can we trust this?" in plain words (no charts to interpret); analysts can open the evidence, SQL and agent trace. 10-minute demo script below. |
 
@@ -59,7 +61,11 @@ mostly does not happen.
  claim / use case
        │
  1 PLAN (Claude)         metric catalog (27 operational metrics) → primary metric, strongest feasible design,
-       │                 hidden-cost guardrails, hypotheses. Validated against the catalog: Claude never writes SQL.
+       │                 hidden-cost guardrails, hypotheses, and how well the catalog fits this project.
+ 1b MEASURE BUILDER      weak or no fit → retrieve the best tables from the data dictionary (BM25 over 116 tables,
+    (Claude + code)      1,042 column descriptions) → Claude designs a measure as SQL expressions → code checks it
+       │                 (expressions only, columns exist, AI flag really is this project's, enough records on both
+       │                 sides, outcome-delay cut-off) → fingerprinted (SHA-256) before anything is measured.
  2 EXECUTE (code)        DuckDB: diff-in-diff / AI-vs-non-AI / before-after, all designs as cross-checks.
        │                 Every number → evidence item (SQL + sample record IDs).
  3 CONFOUNDER HUNT       change-point month + "what changed" (tool version, vendor, channel…)
@@ -96,6 +102,7 @@ experimentation team or an econometrician would**, then explains it in plain lan
 | **Evidence-supported value** | Verified effect × AI volume → staff-hours and $ actually supported vs reported. | Counterfactual, attribution and dollar-translation tests for AI ROI [7] |
 | **Pilot charter** | Pre-registered next step: hypothesis, margin, sample size, duration, guardrail bounds, decision rule. | Pre-registered experiments [3][4] |
 | **AI that argues with itself** | Skeptic stage hunts for the strongest alternative explanation before the verdict. | Twyman's law: surprising results are usually errors [3] |
+| **Measure builder (retrieval over the data dictionary)** | When no standard measure fits a project, Claude reads the most relevant tables' documentation and designs one; code rejects unsafe SQL, other projects' AI flags (a tool shared by 327 projects cannot prove one project's effect), thin samples and not-yet-final records, and fingerprints the design before measuring. Results are labelled "designed by Claude" for analyst sign-off. | Pre-registration [3][4]; NIST AI RMF MEASURE 2.3 [1] |
 | **Receipts, grounding, rubric guard** | Every number has SQL + record IDs; numbers in Claude's text are matched to evidence; Claude cannot silently change the verdict. | Responsible-AI rule "ground your answers" (brief §7) |
 
 ## Live demo script (≤ 10 minutes)
@@ -192,6 +199,8 @@ auditor/
   facts.py              use-case facts, rollout dates, portfolio red-flag screen
   plans.py              plan validation, reviewed bindings for UC0001-UC0008, keyword heuristic
   plain.py              plain-language view for non-analysts (verdict, said vs found, trust checks, next step)
+  schema.py             data-dictionary retrieval (BM25 over table and column descriptions)
+  measure_builder.py    Claude-designed measures: validation, attribution, outcome-delay cut-off, fingerprint
   ledger.py, memo.py    decision ledger (SQLite) and memo export
 scripts/                extract_data.py, fetch_data.py (S3), check_llm.py, audit_cli.py
 deploy/                 DEPLOY.md, IAM policy, EC2 user data, ECS task definition, ECR push script

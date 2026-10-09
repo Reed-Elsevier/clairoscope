@@ -6,6 +6,8 @@ themselves grounding-checked in agent.py.
 """
 from __future__ import annotations
 
+import re
+
 from .catalog import METRICS
 
 VERDICT_TEXT = {
@@ -27,6 +29,51 @@ DESIGN_TEXT = {
     "treated": "work done with the AI vs similar work done without it, same period",
     "before_after": "the year before the AI vs the year after",
 }
+# Acronyms a non-specialist may not know: spelled out the first time they appear on a page.
+# Everyday ones (AI, IT, PDF, ID) are left alone.
+GLOSSARY = {
+    "CSAT": "customer satisfaction score",
+    "SLA": "service-level agreement, the agreed on-time target",
+    "QA": "quality assurance",
+    "KPI": "key performance indicator",
+    "PIA": "privacy impact assessment",
+    "AP": "accounts payable",
+    "PO": "purchase order",
+    "AHT": "average handling time",
+    "XML": "the structured file format articles are published in",
+    "CX": "customer experience",
+    "RAG": "AI that answers from company documents",
+    "KYC": "know your customer",
+    "FTE": "full-time equivalent",
+    "ROI": "return on investment",
+    "LLM": "large language model",
+    "SOP": "standard operating procedure",
+    "UAT": "user acceptance testing",
+    "DTD": "document type definition",
+}
+
+
+def explain(text: str, seen: set[str]) -> str:
+    """Spell out each glossary acronym at its first appearance; an acronym already given as 'words (ACR)' counts."""
+    if not text:
+        return text
+    for acr, meaning in GLOSSARY.items():
+        if acr in seen:
+            continue
+        if re.search(rf"\({acr}\)|(?<!\w){acr} \(", text):
+            seen.add(acr)
+            continue
+        new, n = re.subn(rf"(?<![\w(]){acr}(?![\w)])", f"{acr} ({meaning})", text, count=1)
+        if n:
+            text = new
+            seen.add(acr)
+    return text
+
+
+def terms_in(*names: str) -> list[str]:
+    """Glossary lines for acronyms inside proper names, which are never rewritten."""
+    found = [a for a in GLOSSARY if any(re.search(rf"(?<!\w){a}(?!\w)", n or "") for n in names)]
+    return [f"{a} means {GLOSSARY[a]}." for a in found]
 
 
 def fmt(v: float | None, unit: str) -> str:
@@ -52,6 +99,14 @@ def _checks(r: dict) -> list[dict]:
     uc, claim = r["use_case"], r.get("claim") or {}
     checks = []
 
+    md = r.get("measure_design")
+    if md:
+        spec = md["spec"]
+        checks.append({"question": "Is this the right thing to measure?", "status": "warn",
+                       "answer": f"Probably, but check it. No standard measure fits this project, so Claude designed "
+                                 f"one from the {spec['table'].replace('_', ' ')} records: {spec['why']} "
+                                 f"An analyst should confirm it before the result is relied on."})
+
     t = _trap(r, "KPI_BEFORE_PILOT", "CURRENT_NOT_REPRODUCIBLE", "BASELINE_NOT_REPRODUCIBLE", "CLAIM_SHOWS_DECLINE")
     if t:
         answers = {
@@ -62,9 +117,12 @@ def _checks(r: dict) -> list[dict]:
             "CLAIM_SHOWS_DECLINE": "No. The report's own numbers show the metric got worse.",
         }
         checks.append({"question": "Are the reported numbers accurate?", "status": "fail", "answer": answers[t["code"]]})
-    elif claim:
+    elif claim and r.get("claim_level"):
         checks.append({"question": "Are the reported numbers accurate?", "status": "pass",
                        "answer": "Yes. They are consistent with operations data."})
+    elif claim:
+        checks.append({"question": "Are the reported numbers accurate?", "status": "warn",
+                       "answer": "Not checked. Operations data has nothing to compare them with."})
 
     if _trap(r, "SIMPSON", "PRE_TREND"):
         checks.append({"question": "Was it compared fairly?", "status": "fail",
@@ -155,6 +213,8 @@ def _next_step(r: dict) -> str:
 def build_view(r: dict) -> dict:
     v, rub, eff, plan = r["verdict"], r["rubric"], r.get("primary_effect"), r.get("plan")
     label, color, answer = VERDICT_TEXT[v["verdict"]]
+    if any(t["code"] == "NOT_LIVE" for t in r["traps"]):
+        label, answer = "Not live yet", "Nothing to check yet. This project is still an idea, so it has no results to verify."
     action = v["recommendation"]["action"]
     unit = METRICS[plan["primary"]["metric"]].unit if plan else ""
     metric_label = METRICS[plan["primary"]["metric"]].label if plan else ""
@@ -174,11 +234,14 @@ def build_view(r: dict) -> dict:
     if eff:  # the AI's effect could be measured: show claimed change vs measured change
         comparison = {
             "kind": "change", "metric": metric_label,
+            "said_metric": claim.get("kpi_name") if r.get("measure_design") and claim else None,
             "said": pct(claimed_rel) if claimed_rel is not None else "no number given",
             "found": pct(eff["rel"]),
             "before": fmt(eff["baseline"], unit), "after": fmt(eff["current"], unit),
             "before_raw": eff["baseline"], "after_raw": eff["current"],
-            "how": DESIGN_TEXT[eff["design"]], "higher_is_better": hib,
+            "how": ("this project's own area vs the rest of the organisation, before and after its rollout"
+                    if r.get("measure_design") and eff["design"] == "did" else DESIGN_TEXT[eff["design"]]),
+            "higher_is_better": hib,
         }
     elif claim and r.get("claim_level"):  # effect not measurable: show reported value vs what operations show
         cl = r["claim_level"]
@@ -191,7 +254,11 @@ def build_view(r: dict) -> dict:
             "higher_is_better": hib,
         }
 
-    hidden = [{"label": h["label"], "before": fmt(h.get("before"), h.get("unit", "")),
+    stage = (r["use_case"].get("stage") or "").lower()
+    serious = {"scaled": "A serious drop, and this AI is already in use at scale: fix it now.",
+               "retired": "A serious drop while this AI was in use."}.get(
+        stage, "A serious drop: fix this before rolling it out further.")
+    hidden = [{"label": h["label"], "note": serious if h["severity"] == "major" else "", "before": fmt(h.get("before"), h.get("unit", "")),
                "after": fmt(h.get("after"), h.get("unit", "")), "before_raw": h.get("before"),
                "after_raw": h.get("after"), "severity": h["severity"],
                "sentence": f"{h['label']} went from {fmt(h.get('before'), h.get('unit', ''))} to "
@@ -210,21 +277,26 @@ def build_view(r: dict) -> dict:
     if comparison and comparison["kind"] == "level":
         tagline = f"Reported {comparison['said']}; operations data shows {comparison['found']}"
     elif comparison:
-        tagline = f"Claimed {comparison['said']}, measured {comparison['found']} ({lc(comparison['metric'])})"
+        tagline = f"Claimed {comparison['said']}, measured {comparison['found']} in {lc(comparison['metric'])}"
     else:
         tagline = answer
     if major:
         tagline += f", but {lc(major['label'])} {major['before']} → {major['after']}"
     llm_written = not r["mode"].startswith("deterministic")
 
-    return {
+    view = {
         "verdict": v["verdict"], "verdict_label": label, "color": color, "answer": answer, "tagline": tagline,
-        "headline": v["headline"] if llm_written else tagline, "summary": v["summary"],
+        # a contested headline would contradict the stamp; show the measured facts and the objection instead
+        "headline": v["headline"] if llm_written and not r.get("contested") else tagline, "summary": v["summary"],
         "contested": r.get("contested", False),
+        "contested_reason": v.get("override_reason", "").split(". ")[0].rstrip(".") + "." if r.get("contested") else "",
         "action": {"key": action, "label": ACTION_TEXT.get(action, action), "text": v["recommendation"]["text"]},
         "claim_text": r.get("claim_text") or (f"{claim.get('kpi_name')}: {claim.get('baseline')} → {claim.get('current')}"
                                               if claim else ""),
         "comparison": comparison,
+        "no_test_reason": next((t["detail"] for t in r["traps"] if t["code"] in ("NOT_ATTRIBUTABLE", "NOT_LIVE", "NO_MEASURE")), None),
+        "designed_measure": ({"label": r["measure_design"]["spec"]["label"],
+                              "table": r["measure_design"]["spec"]["table"]} if r.get("measure_design") else None),
         "hidden_costs": hidden,
         "value": {"reported": f"${reported:,.0f}", "supported": f"${supported:,.0f}",
                   "reported_raw": reported, "supported_raw": supported,
@@ -237,3 +309,24 @@ def build_view(r: dict) -> dict:
                     "(same verdict rules, template wording). Reason: " + r["llm_errors"][0][:200])
         if r.get("llm_errors") else None,
     }
+    return _explain_view(view)
+
+
+def _explain_view(view: dict) -> dict:
+    """Spell out acronyms in reading order, once per page."""
+    seen: set[str] = set()
+    ex = lambda t: explain(t, seen)  # noqa: E731
+    view["headline"], view["summary"] = ex(view["headline"]), ex(view["summary"])
+    view["contested_reason"] = ex(view["contested_reason"])
+    view["claim_text"] = ex(view["claim_text"])
+    view["no_test_reason"] = ex(view["no_test_reason"])
+    if view["comparison"]:
+        view["comparison"]["metric"] = ex(view["comparison"]["metric"])
+    for h in view["hidden_costs"]:
+        h["label"], h["sentence"] = ex(h["label"]), ex(h["sentence"])
+    for c in view["checks"]:
+        c["answer"] = ex(c["answer"])
+    view["value"]["sentence"], view["value"]["basis"] = ex(view["value"]["sentence"]), ex(view["value"]["basis"])
+    view["next_step"], view["action"]["text"] = ex(view["next_step"]), ex(view["action"]["text"])
+    view["terms"] = terms_in(view["use_case"]["name"])
+    return view

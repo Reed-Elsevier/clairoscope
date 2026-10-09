@@ -1,4 +1,4 @@
-# Deploying the AI Value Auditor on AWS
+# Deploying the Clairoscope on AWS
 
 One container (FastAPI API + web UI on port 8080). Two supported paths, matching the brief's
 "REPH-approved AWS environment using EC2 or ECS":
@@ -40,8 +40,8 @@ Update after a code change: SSH/SSM into the instance, `cd /opt/auditor && git p
 ## B. ECS Fargate
 
 1. **Image**: run [`build-and-push.sh`](build-and-push.sh) from the repo root on a machine with Docker + AWS CLI
-   (the EC2 instance from path A works). It creates the ECR repo `ai-value-auditor` and pushes `:latest`.
-2. **Secret** (optional login): `aws secretsmanager create-secret --name ai-value-auditor/basic-auth --secret-string 'demo:CHANGE-ME'`.
+   (the EC2 instance from path A works). It creates the ECR repo `clairoscope` and pushes `:latest`.
+2. **Secret** (optional login): `aws secretsmanager create-secret --name clairoscope/basic-auth --secret-string 'demo:CHANGE-ME'`.
    The ECS *execution* role needs `secretsmanager:GetSecretValue` on it and `logs:CreateLogGroup`.
 3. **Task definition**: edit [`ecs-task-definition.json`](ecs-task-definition.json) (`CHANGE-ME-ACCOUNT`,
    `CHANGE-ME-BUCKET`) and register it:

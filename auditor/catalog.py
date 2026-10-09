@@ -1,7 +1,8 @@
 """Metric catalog: the semantic layer the auditor (and the LLM) may measure with.
 
-The LLM never writes SQL. It chooses metrics, filters and designs from this catalog;
-the engine turns them into parameterised queries. Every metric's SQL yields one row per
+The planner LLM chooses metrics, filters and designs from this catalog; the engine turns them into
+parameterised queries. Projects the catalog does not fit go to measure_builder.py, where Claude writes
+SQL *expressions* that code validates before running. Every metric's SQL yields one row per
 operational record with columns: id, ts, value, plus optional treated / adopter / go_live
 and the declared dimension columns. Rate metrics emit 0 or 100 so means are percentages.
 """
@@ -66,7 +67,7 @@ METRICS: dict[str, Metric] = {m.key: m for m in [
            "Average agent handling time per support case.",
            _support("s.handle_time_min"), _SUPPORT_DIMS, "Copilot used on case", "Copilot teams", tags=("support",),
            labor=True),
-    Metric("support_csat", "Support CSAT", "score", True, "support_cases",
+    Metric("support_csat", "Customer satisfaction score (CSAT)", "score", True, "support_cases",
            "Customer satisfaction score (1-5) per case.",
            _support("s.csat"), _SUPPORT_DIMS, "Copilot used on case", "Copilot teams", tags=("support",)),
     Metric("support_reopen", "Support reopen rate", "%", False, "support_cases",
@@ -75,7 +76,7 @@ METRICS: dict[str, Metric] = {m.key: m for m in [
     Metric("support_escalation", "Support escalation rate", "%", False, "support_cases",
            "Share of cases escalated.",
            _support("s.escalated::int * 100"), _SUPPORT_DIMS, "Copilot used on case", "Copilot teams", tags=("support",)),
-    Metric("support_sla", "Support resolution SLA", "%", True, "support_cases",
+    Metric("support_sla", "Support cases resolved on time (SLA)", "%", True, "support_cases",
            "Share of cases resolved within SLA.",
            _support("s.sla_met::int * 100"), _SUPPORT_DIMS, "Copilot used on case", "Copilot teams", tags=("support",)),
     # --- Legal editorial (UC0002 Legal Auto-Classify) ---
@@ -86,7 +87,7 @@ METRICS: dict[str, Metric] = {m.key: m for m in [
     Metric("legal_accuracy", "Legal task accuracy", "score", True, "editorial_tasks",
            "Accuracy score (0-1) assigned by legal QA.",
            _legal("accuracy_score"), ("task_type", "team_id", "model_id"), "AI-assisted task", tags=("legal",)),
-    Metric("legal_qa_pass", "Legal QA pass rate", "%", True, "editorial_tasks",
+    Metric("legal_qa_pass", "Legal quality check (QA) pass rate", "%", True, "editorial_tasks",
            "Share of editorial tasks passing QA.",
            _legal("qa_passed::int * 100"), ("task_type", "team_id", "model_id"), "AI-assisted task", tags=("legal",)),
     Metric("legal_update_latency", "Regulatory update latency", "hours", False, "regulatory_update_impacts",
@@ -96,16 +97,16 @@ METRICS: dict[str, Metric] = {m.key: m for m in [
               from regulatory_update_impacts i join regulatory_updates u using (update_id)
               join jurisdictions j using (jurisdiction_id)""", ("jurisdiction", "update_type"), tags=("legal",)),
     # --- Publishing production (UC0003 XML Auto-Validation Agent) ---
-    Metric("xml_rework_rate", "XML conversion rework rate", "%", False, "content_production_jobs",
+    Metric("xml_rework_rate", "Article file (XML) conversion rework rate", "%", False, "content_production_jobs",
            "Share of XML conversion jobs needing at least one rework.",
            _xml("(rework_count >= 1)::int * 100"), ("tool_version", "vendor_name", "team_id"), tags=("publishing",)),
-    Metric("xml_sla", "XML conversion SLA", "%", True, "content_production_jobs",
+    Metric("xml_sla", "Article file (XML) conversions on time", "%", True, "content_production_jobs",
            "Share of XML conversion jobs finished within SLA.",
            _xml("sla_met::int * 100"), ("tool_version", "vendor_name", "team_id"), tags=("publishing",)),
-    Metric("xml_hours", "XML conversion elapsed hours", "hours", False, "content_production_jobs",
+    Metric("xml_hours", "Article file (XML) conversion hours", "hours", False, "content_production_jobs",
            "Elapsed hours per XML conversion job.",
            _xml("elapsed_hours"), ("tool_version", "vendor_name", "team_id"), tags=("publishing",)),
-    Metric("production_sla", "Production SLA (all stages)", "%", True, "content_production_jobs",
+    Metric("production_sla", "Production jobs on time, all stages", "%", True, "content_production_jobs",
            "Share of production jobs (all stages) within SLA.",
            """select job_id as id, started_at as ts, sla_met::int * 100 as value, stage, vendor_name
               from content_production_jobs""", ("stage", "vendor_name"), tags=("publishing",)),
@@ -115,7 +116,7 @@ METRICS: dict[str, Metric] = {m.key: m for m in [
                      datediff('hour', submitted_at, first_decision_at) / 24.0 as value, journal_id, article_type
               from manuscripts where first_decision_at is not null""", ("journal_id", "article_type"), tags=("publishing",)),
     # --- Finance AP (UC0004 Invoice Exception Triage Agent) ---
-    Metric("ap_exception_hours", "AP exception resolution hours", "hours", False, "invoice_exceptions",
+    Metric("ap_exception_hours", "Hours to resolve invoice exceptions", "hours", False, "invoice_exceptions",
            "Hours from exception raised to resolved.",
            """select exception_id as id, raised_at as ts,
                      datediff('minute', raised_at, resolved_at) / 60.0 as value, exception_type, resolution
@@ -127,7 +128,7 @@ METRICS: dict[str, Metric] = {m.key: m for m in [
                      (exists (select 1 from invoice_exceptions e where e.invoice_id = i.invoice_id))::int * 100 as value,
                      i.channel, i.approval_level
               from invoices i""", ("channel", "approval_level"), tags=("finance",)),
-    Metric("ap_no_po_rate", "Invoices without PO", "%", False, "invoices",
+    Metric("ap_no_po_rate", "Invoices without a purchase order", "%", False, "invoices",
            "Share of invoices received without a purchase order.",
            """select invoice_id as id, received_at as ts, (po_id is null)::int * 100 as value, channel, approval_level
               from invoices""", ("channel", "approval_level"), tags=("finance",)),
@@ -172,7 +173,7 @@ METRICS: dict[str, Metric] = {m.key: m for m in [
            """select ticket_id as id, created_at as ts, datediff('minute', created_at, resolved_at) / 60.0 as value,
                      category, priority, ticket_type
               from it_tickets where resolved_at is not null""", ("category", "priority", "ticket_type"), tags=("technology",)),
-    Metric("it_sla", "IT ticket SLA", "%", True, "it_tickets",
+    Metric("it_sla", "IT tickets resolved on time", "%", True, "it_tickets",
            "Share of IT tickets resolved within SLA.",
            """select ticket_id as id, created_at as ts, sla_met::int * 100 as value, category, priority, ticket_type
               from it_tickets where sla_met is not null""", ("category", "priority", "ticket_type"), tags=("technology",)),
