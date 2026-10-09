@@ -81,11 +81,19 @@ main { max-width: 960px; margin: 0 auto; padding: 0 20px 56px; }
 .ask-title { font-size: 1.15rem; margin-bottom: 4px; }
 .ask-sub { color: var(--pencil); margin-bottom: 12px; max-width: 68ch; }
 .ask-row { display: flex; gap: 10px; }
+.combo { position: relative; flex: 1; min-width: 0; }
 .ask-row input {
-  flex: 1; min-width: 0; font: inherit; padding: 13px 14px; color: var(--ink); background: var(--sheet);
+  width: 100%; font: inherit; padding: 13px 14px; color: var(--ink); background: var(--sheet);
   border: 1.5px solid var(--rule); border-bottom: 2px solid var(--ink); border-radius: 4px 4px 0 0;
 }
 .ask-row input::placeholder { color: var(--pencil); opacity: .85; }
+.suggest { position: absolute; z-index: 10; left: 0; right: 0; top: 100%; margin: 0; padding: 4px 0; list-style: none;
+  background: var(--sheet); border: 1.5px solid var(--rule); border-top: 0; border-radius: 0 0 4px 4px;
+  box-shadow: 0 6px 14px color-mix(in srgb, var(--ink) 12%, transparent); max-height: 340px; overflow-y: auto; }
+.suggest li { display: flex; justify-content: space-between; gap: 12px; padding: 8px 14px; cursor: pointer; }
+.suggest li[aria-selected="true"], .suggest li:hover { background: color-mix(in srgb, var(--ink) 8%, transparent); }
+.suggest .meta { color: var(--pencil); font-size: .85rem; white-space: nowrap; }
+.suggest mark { background: none; color: inherit; font-weight: 700; }
 .btn-ink {
   font-weight: 700; padding: 12px 22px; border: 0; border-radius: 4px; background: var(--ink); color: var(--sheet);
   cursor: pointer; white-space: nowrap;

@@ -50,7 +50,7 @@ async function init() {
   renderLlm(cfg.llm);
   state.useCases = ucs;
   $("#uc-count").textContent = ucs.length.toLocaleString("en-US");
-  $("#uc-list").innerHTML = ucs.map((u) => `<option value="${esc(u.name)} (${esc(u.id)})">${esc(u.stage)}${u.flagship ? ", flagship" : ""}</option>`).join("");
+  setupSuggest(ucs);
   loadOverview();
   const deep = new URLSearchParams(location.search).get("uc");
   if (new URLSearchParams(location.search).get("ai") === "0") $("#use-llm").checked = false; // fast demo link
@@ -99,6 +99,97 @@ async function reloadLlm() {
   } catch (e) { $(".txt", $("#ai-status")).textContent = "Claude: " + e.message; }
 }
 
+// ---------------------------------------------------------------- project suggestions
+// A light dropdown instead of a <datalist>: browsers re-filter and re-render all 600 datalist options on every
+// keystroke, which lags. Here the search text is prepared once and only the best 8 matches are drawn.
+const SUGGEST_MAX = 8;
+const sugg = { items: [], shown: [], active: -1, raf: 0 };
+
+function setupSuggest(ucs) {
+  sugg.items = ucs.map((u) => ({ u, id: u.id.toLowerCase(), name: u.name.toLowerCase() }));
+  const input = $("#ask-input");
+  input.addEventListener("input", () => {  // at most one filter per frame, however fast someone types
+    cancelAnimationFrame(sugg.raf);
+    sugg.raf = requestAnimationFrame(() => showSuggest(input.value));
+  });
+  input.addEventListener("keydown", onSuggestKey);
+  input.addEventListener("blur", () => setTimeout(hideSuggest, 120));
+  input.addEventListener("focus", () => input.value && showSuggest(input.value));
+  $("#suggest").addEventListener("mousedown", (e) => {  // mousedown fires before blur
+    const li = e.target.closest("li");
+    if (li) { e.preventDefault(); pickSuggest(Number(li.dataset.i)); }
+  });
+}
+
+function rank(it, q, words) {
+  if (it.id === q) return 0;
+  if (it.id.startsWith(q)) return 1;
+  if (it.name.startsWith(q)) return 2;
+  if (it.name.includes(q)) return 3;
+  return words.every((w) => it.name.includes(w) || it.id.includes(w)) ? 4 : -1;
+}
+
+function showSuggest(text) {
+  const q = text.trim().toLowerCase();
+  const words = q.split(/\s+/).filter(Boolean);
+  if (!q || words.length >= 6) return hideSuggest();  // long text is a claim, not a project search
+  const hits = [];
+  for (const it of sugg.items) {
+    const r = rank(it, q, words);
+    if (r >= 0) hits.push([r, it]);
+  }
+  hits.sort((a, b) => a[0] - b[0] || (b[1].u.flagship - a[1].u.flagship) || a[1].id.localeCompare(b[1].id));
+  sugg.shown = hits.slice(0, SUGGEST_MAX).map((h) => h[1].u);
+  sugg.active = -1;
+  if (!sugg.shown.length) return hideSuggest();
+  const hl = (s) => {
+    const i = s.toLowerCase().indexOf(q);
+    return i < 0 ? esc(s) : esc(s.slice(0, i)) + "<mark>" + esc(s.slice(i, i + q.length)) + "</mark>" + esc(s.slice(i + q.length));
+  };
+  const list = $("#suggest");
+  list.innerHTML = sugg.shown.map((u, i) => `<li role="option" id="sg-${i}" data-i="${i}" aria-selected="false">
+    <span>${hl(u.name)}</span><span class="meta">${esc(u.id)}, ${esc(String(u.stage).toLowerCase())}${u.flagship ? ", flagship" : ""}</span></li>`).join("")
+    + (hits.length > SUGGEST_MAX ? `<li class="meta" aria-disabled="true" style="cursor:default">${hits.length - SUGGEST_MAX} more: keep typing to narrow down</li>` : "");
+  list.hidden = false;
+  $("#ask-input").setAttribute("aria-expanded", "true");
+}
+
+function hideSuggest() {
+  $("#suggest").hidden = true;
+  $("#ask-input").setAttribute("aria-expanded", "false");
+  $("#ask-input").removeAttribute("aria-activedescendant");
+  sugg.active = -1;
+}
+
+function onSuggestKey(e) {
+  if ($("#suggest").hidden) return;
+  const n = sugg.shown.length;
+  if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+    e.preventDefault();
+    // cycle through the options and back to the typed text (-1)
+    const pos = (sugg.active + 1 + (e.key === "ArrowDown" ? 1 : -1) + (n + 1)) % (n + 1);
+    sugg.active = pos - 1;
+    document.querySelectorAll("#suggest li[role=option]").forEach((li, i) => li.setAttribute("aria-selected", i === sugg.active));
+    if (sugg.active >= 0) {
+      $("#ask-input").setAttribute("aria-activedescendant", `sg-${sugg.active}`);
+      $(`#sg-${sugg.active}`).scrollIntoView({ block: "nearest" });
+    } else $("#ask-input").removeAttribute("aria-activedescendant");
+  } else if (e.key === "Enter" && sugg.active >= 0) {
+    e.preventDefault();
+    pickSuggest(sugg.active);
+  } else if (e.key === "Escape") {
+    hideSuggest();
+  }
+}
+
+function pickSuggest(i) {
+  const u = sugg.shown[i];
+  if (!u) return;
+  $("#ask-input").value = `${u.name} (${u.id})`;
+  hideSuggest();
+  runAudit({ use_case_id: u.id });
+}
+
 // One box: a project (name or ID) or a free-text claim
 function resolveInput(text) {
   const t = text.trim();
@@ -117,6 +208,7 @@ function resolveInput(text) {
 }
 
 function submit() {
+  hideSuggest();
   $("#ask-error").classList.add("hidden");
   const body = resolveInput($("#ask-input").value);
   if (!body) return showError("Type a project name, an ID like UC0002, or the claim you want checked.");

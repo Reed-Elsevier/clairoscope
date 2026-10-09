@@ -32,10 +32,12 @@
       <p class="ask-sub">Every project in the AI portfolio can be checked, not just the eight below. Type a project name
         or ID, or paste what a team claims.</p>
       <form id="ask-form" class="ask-row">
-        <input id="ask-input" list="uc-list" autocomplete="off"
-               placeholder="A project name, an ID like UC0002, or a claim such as “The legal classifier cut handling time by 43%”"
-               aria-labelledby="ask-title">
-        <datalist id="uc-list"></datalist>
+        <div class="combo">
+          <input id="ask-input" autocomplete="off" role="combobox" aria-autocomplete="list" aria-expanded="false"
+                 aria-controls="suggest" aria-labelledby="ask-title"
+                 placeholder="A project name, an ID like UC0002, or a claim such as “The legal classifier cut handling time by 43%”">
+          <ul id="suggest" class="suggest" role="listbox" aria-label="Matching projects" hidden></ul>
+        </div>
         <button id="run-btn" class="btn-ink" type="submit">Check it</button>
       </form>
       <label class="toggle"><input type="checkbox" id="use-llm" checked>
