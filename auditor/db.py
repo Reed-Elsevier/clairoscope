@@ -31,7 +31,7 @@ def _connection() -> duckdb.DuckDBPyConnection:
 
 
 def query(sql: str, params: list | None = None) -> pd.DataFrame:
-    """Run SQL on a fresh cursor (thread-safe for Streamlit) and return a DataFrame."""
+    """Run SQL on a fresh cursor (thread-safe for the web server) and return a DataFrame."""
     cur = _connection().cursor()
     try:
         return cur.execute(sql, params or []).df()

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import os
 import sqlite3
 from datetime import datetime
 from pathlib import Path
@@ -10,7 +11,8 @@ import pandas as pd
 
 from .db import ROOT
 
-DB = ROOT / ".state" / "ledger.sqlite"
+# AUDITOR_STATE_DIR lets AWS deployments put the ledger on a persistent volume (EBS/EFS)
+DB = Path(os.environ.get("AUDITOR_STATE_DIR", "").strip() or ROOT / ".state") / "ledger.sqlite"
 
 
 def _conn() -> sqlite3.Connection:
@@ -45,6 +47,13 @@ def history() -> pd.DataFrame:
             select a.created_at, a.use_case_id, a.use_case_name, a.verdict, a.rubric_verdict, a.mode,
                    d.reviewer, d.decision, d.agrees_with_verdict, d.note, d.decided_at, a.audit_id
             from audits a left join decisions d using (audit_id) order by a.created_at desc""", c)
+
+
+def latest_decision(audit_id: str) -> dict | None:
+    with _conn() as c:
+        row = c.execute("select reviewer, agrees_with_verdict, decision, note from decisions where audit_id = ? "
+                        "order by id desc limit 1", (audit_id,)).fetchone()
+    return {"reviewer": row[0], "agrees": bool(row[1]), "decision": row[2], "note": row[3]} if row else None
 
 
 def load_report(audit_id: str) -> dict | None:

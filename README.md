@@ -35,11 +35,11 @@ Reproduce with `python scripts/audit_cli.py --all-flagship --no-llm` (determinis
 
 | Criterion | Weight | How the prototype answers it |
 |---|---|---|
-| **Working prototype** | 35% | Live input-to-outcome flow: pick any of 600 use cases *or type a claim* → agent trace streams → verdict, charts, receipts → human decision → memo. Any judge input works (no scripted path). Falls back to deterministic mode if the LLM is unreachable. 14 automated tests. |
+| **Working prototype** | 35% | Live web app on AWS: pick any of 600 use cases *or type a claim* → progress streams in plain words → verdict a non-analyst understands at a glance → human decision → memo. Any judge input works (no scripted path). If the LLM is unreachable it says so and falls back to rule-based mode. 15 automated tests. |
 | **Business impact & value** | 25% | Answers the brief's central question ("what is really working?"). Converts each verdict into **evidence-supported $** and verified staff-hours, a portfolio red-flag screen over all 600 use cases, and a **pilot charter** that tells leaders how to validate the next step. |
 | **AI utilisation** | 15% | Claude plans a counterfactual test, chooses hidden costs to watch, **argues against its own conclusion** (skeptic stage), and writes the verdict. AI does the judgement; code does the arithmetic. |
-| **Technical feasibility** | 15% | Small, readable Python package; DuckDB over Parquet; LLM output schema-validated; numeric grounding check; rubric guard; Bedrock auth via standard AWS chain or bearer token; `check_llm.py` doctor; deployable on EC2/ECS as one process. |
-| **Presentation** | 10% | 10-minute demo script below; every number on screen has a clickable evidence receipt; limitations and simulated parts disclosed in the UI and here. |
+| **Technical feasibility** | 15% | Small, readable Python package; FastAPI + dependency-free web UI; DuckDB over Parquet; LLM output schema-validated; numeric grounding check; rubric guard; Bedrock via IAM role or bearer token; one Docker image with EC2 and ECS Fargate recipes ([deploy/](deploy/DEPLOY.md)). |
+| **Presentation** | 10% | First screen answers "does it work, should we scale it, can we trust this?" in plain words (no charts to interpret); analysts can open the evidence, SQL and agent trace. 10-minute demo script below. |
 
 ## The problem
 
@@ -101,10 +101,10 @@ experimentation team or an econometrician would**, then explains it in plain lan
 ## Live demo script (≤ 10 minutes)
 
 1. **Problem (1 min).** "This team says AI cut legal classification time 43%. Should we scale it?"
-2. **Audit UC0002 live (3 min).** Watch the agent trace → TRADE-OFF → QA pass 98% → 20% chart → open an evidence receipt (SQL + record IDs) → show the eval-vs-production trap.
+2. **Audit UC0002 live (3 min).** Click its card → watch the plain-language progress → *"Partly. The benefit is real, but something important got worse."* → "They said −43%, we found −45%" → "QA pass rate 97.9% → 20.3%" → trust checklist → open *Show the evidence* for the SQL receipt.
 3. **Audit UC0006 (1.5 min).** The placebo test fails: the decline started before the RAG pilot.
 4. **Judge's input (2 min).** Any use case ID or a typed claim, e.g. *"the support copilot cut handling time by half"*.
-5. **Decide and land the value (2.5 min).** Record a decision, download the memo and pilot charter, then the portfolio tab: **$827k reported vs $272k supported**, plus the red-flag screen over 600 use cases.
+5. **Decide and land the value (2.5 min).** Record a decision, download the memo, then scroll to the landing numbers: **$827k reported vs $272k backed by data**, 2 of 8 claims hold up, plus the red-flag table over 600 use cases.
 
 Backup: `python scripts/audit_cli.py UC0002 -v` runs the same pipeline in a terminal.
 
@@ -117,7 +117,7 @@ pip install -r requirements.txt
 python scripts/extract_data.py              # center_data.zip -> ./data (Parquet + _docs)
 copy .env.example .env                      # then fill in the Bedrock section
 python scripts/check_llm.py                 # prints provider/model/region/auth, makes one test call -> READY
-python -m streamlit run app.py              # http://localhost:8501
+python -m uvicorn web.server:app --port 8080 # http://localhost:8080  (add ?uc=UC0002&ai=0 for a fast rule-based demo link)
 ```
 
 ### Amazon Bedrock (core LLM)
@@ -143,7 +143,7 @@ set `AUDITOR_FALLBACK_MODEL` to retry declined requests on another model.
 | `check_llm.py` says | Fix |
 |---|---|
 | `Set AWS_REGION` | Add `AWS_REGION` to `.env` |
-| `Authentication failed` | Credentials expired or wrong: re-run `aws sso login` or refresh keys/token |
+| `Authentication failed` | Credentials expired or wrong: re-run `aws sso login` or refresh keys/token. A **short-term** Bedrock API key (`bedrock-api-key-...`) dies when the console session that created it ends, often well before the 12 h shown: use a long-term key or an IAM role for the demo |
 | `Access denied to <model>` | Enable model access in the Bedrock console; check IAM permissions above |
 | `Model '<id>' not found` | Wrong ID for the region or API; try `AUDITOR_BEDROCK_API=invoke` with an inference-profile ID |
 | `Cannot reach the endpoint` | Network/proxy, or a region without the endpoint |
@@ -158,18 +158,29 @@ Alternatives (same code path): `AUDITOR_LLM=claude` with `ANTHROPIC_API_KEY`, or
 ```powershell
 python scripts/audit_cli.py UC0002 -v
 python scripts/audit_cli.py --claim "The legal classifier cut handling time 43%"
-python -m pytest -q tests        # 14 tests; a scripted fake LLM tests the guards, no API key needed
+pip install -r requirements-dev.txt
+python -m pytest -q tests        # 15 tests incl. the web API; a scripted fake LLM tests the guards, no API key needed
 ```
 
-### Deploying on AWS (EC2/ECS)
+### Deploying on AWS (EC2 or ECS)
 
-One Streamlit process. Copy the repo and extracted `data/`, give the instance/task role Bedrock permissions,
-set `AWS_REGION`, then `python -m streamlit run app.py --server.port 8501 --server.address 0.0.0.0`.
+One Docker image ([Dockerfile](Dockerfile)) serves the API and the web UI on port 8080. Full guide:
+**[deploy/DEPLOY.md](deploy/DEPLOY.md)**.
+
+- **EC2 (fastest):** launch Amazon Linux 2023 with the IAM role from [deploy/iam-policy.json](deploy/iam-policy.json)
+  and paste [deploy/ec2-user-data.sh](deploy/ec2-user-data.sh) as user data. It builds and runs the container.
+- **ECS Fargate:** push with [deploy/build-and-push.sh](deploy/build-and-push.sh), register
+  [deploy/ecs-task-definition.json](deploy/ecs-task-definition.json), run 1 task behind an ALB (health check `/api/health`).
+- **Data** is read from a private S3 prefix in the event account (`AUDITOR_DATA_S3_URI`), never from git.
+- **Bedrock** uses the instance/task IAM role (no key to expire); a bearer key also works.
+- **Login:** set `AUDITOR_BASIC_AUTH=user:password` on any public URL.
 
 ## Project structure
 
 ```
-app.py                  Streamlit UI: audit, portfolio truth map + flagship scorecard, decision ledger, how it works
+web/
+  server.py             FastAPI: audit jobs + progress, overview, decisions, memo, chart data, AI status / reload
+  static/               single-page UI (HTML/CSS/JS, no build step, no CDN): plain-language results first
 auditor/
   catalog.py            27 operational metrics (the semantic layer Claude plans with)
   engine.py             diff-in-diff, AI-vs-non-AI, before/after, change-point, what-changed, segments
@@ -180,8 +191,11 @@ auditor/
   llm.py                Claude on Bedrock (Messages / InvokeModel, AWS chain or bearer), Claude API, OpenAI
   facts.py              use-case facts, rollout dates, portfolio red-flag screen
   plans.py              plan validation, reviewed bindings for UC0001-UC0008, keyword heuristic
+  plain.py              plain-language view for non-analysts (verdict, said vs found, trust checks, next step)
   ledger.py, memo.py    decision ledger (SQLite) and memo export
-scripts/                extract_data.py, check_llm.py, audit_cli.py
+scripts/                extract_data.py, fetch_data.py (S3), check_llm.py, audit_cli.py
+deploy/                 DEPLOY.md, IAM policy, EC2 user data, ECS task definition, ECR push script
+Dockerfile              one container for EC2 / ECS
 tests/                  verdict regression, robustness, LLM guard and Bedrock JSON-repair tests
 ```
 
@@ -209,7 +223,7 @@ Curated Parquet only (no data added, modified or generated): `ai_use_cases`, `ai
   is half the claimed effect. Pilot sample sizes assume record-level independence.
 - **Limitations.** Observational data: verdicts are strong evidence, not proof of causation. Use cases whose
   work is not in any catalog table get "no operational data can test this claim".
-- **Third-party components.** DuckDB, pandas, PyArrow, Streamlit, Altair, anthropic[bedrock], openai,
+- **Third-party components.** DuckDB, pandas, PyArrow, FastAPI, uvicorn, anthropic[bedrock], openai,
   python-dotenv (`requirements.txt`).
 - **Responsible AI.** No individual-level ranking. Human decision on every audit. Generated text cites evidence
   and is numerically checked.

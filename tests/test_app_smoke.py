@@ -1,4 +1,4 @@
-"""Smoke tests: the UI renders and the 8 flagship audits produce the expected verdicts (deterministic mode).
+"""Smoke tests: the 8 flagship audits produce the expected verdicts (deterministic mode). UI: tests/test_web.py.
 
 Run: python -m pytest -q tests   (needs ./data extracted)
 """
@@ -26,14 +26,3 @@ def test_flagship_verdicts():
 def test_typed_claim_maps_to_use_case():
     r = run_audit(claim_text="The legal classifier cut handling time 43%")
     assert r["use_case"]["use_case_id"] == "UC0002"
-
-
-def test_app_renders_and_audits():
-    from streamlit.testing.v1 import AppTest
-
-    at = AppTest.from_file(str(ROOT / "app.py"), default_timeout=120)
-    at.run()
-    assert not at.exception
-    at.button[0].click().run()
-    assert not at.exception
-    assert any("TRADE-OFF" in m.value for m in at.markdown)

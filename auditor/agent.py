@@ -370,6 +370,7 @@ def run_audit(use_case_id: str | None = None, claim_text: str | None = None, llm
             on_step(name, detail)
 
     mode = llm.name if llm else "deterministic (no LLM)"
+    llm_errors: list[str] = []
     parsed = None
     if claim_text:
         parsed, how = parse_claim(claim_text, llm)
@@ -397,6 +398,7 @@ def run_audit(use_case_id: str | None = None, claim_text: str | None = None, llm
             plan = raw | {"planner": f"LLM planner ({llm.name})"}
         except (LLMError, KeyError, TypeError, ValueError) as e:
             planner_note = f"LLM planner failed ({e}); "
+            llm_errors.append(str(e))
     if plan is None:
         plan = registered_plan(uc["use_case_id"]) or heuristic_plan(uc)
     warnings: list[str] = []
@@ -485,6 +487,7 @@ def run_audit(use_case_id: str | None = None, claim_text: str | None = None, llm
                 step("Investigate", f"{fu['reasoning'][:200]} -> {len(extra['investigations'])} extra checks")
             except (LLMError, KeyError, TypeError, ValueError) as e:
                 step("Investigate", f"skipped ({e})")
+                llm_errors.append(str(e))
 
     # ---- robustness checks (research-backed falsification tests)
     rob_evs: dict = {}
@@ -533,6 +536,7 @@ def run_audit(use_case_id: str | None = None, claim_text: str | None = None, llm
                     verdict["agrees_with_rubric"] = True
         except (LLMError, KeyError, TypeError, ValueError) as e:
             step("Verdict", f"LLM verdict failed ({e}); using rubric template")
+            llm_errors.append(str(e))
     if verdict is None:
         verdict = _template_verdict(uc, rub, eff, harms, traps, log, inv_evs)
     valid_ids = {e.id for e in log.items}
@@ -556,4 +560,6 @@ def run_audit(use_case_id: str | None = None, claim_text: str | None = None, llm
         "changepoint": cp.data if cp else None,
         "robustness": {k: (v.id if v else None) for k, v in rob_evs.items()},
         "power": pwr, "value": value, "pilot_charter": charter,
+        "claim_level": claim_level_ev.data if claim_level_ev else None,
+        "llm_errors": llm_errors,
     }

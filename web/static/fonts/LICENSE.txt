@@ -1,0 +1,6 @@
+Self-hosted so the app needs no CDN inside a locked-down AWS network. Latin subsets from Google Fonts.
+
+public-sans.woff2                 Public Sans, (c) USWDS / Pablo Impallari, Rodrigo Fuenzalida. SIL Open Font License 1.1.
+source-serif-4-italic.woff2       Source Serif 4 Italic, (c) Adobe. SIL Open Font License 1.1.
+
+License text: https://openfontlicense.org/open-font-license-official-text/

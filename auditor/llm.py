@@ -159,9 +159,16 @@ class ClaudeLLM:
                     self.effort, self.structured = None, False
                     continue
                 raise LLMError(f"Bad request: {e.message}") from e
-            except a.AuthenticationError as e:
-                raise LLMError(f"Authentication failed ({self.auth}): {e.message}") from e
-            except a.PermissionDeniedError as e:
+            except (a.AuthenticationError, a.PermissionDeniedError) as e:
+                if "api key" in str(e).lower() or isinstance(e, a.AuthenticationError):
+                    hint = "Generate a new one and update .env."
+                    if os.environ.get("AWS_BEARER_TOKEN_BEDROCK", "").startswith("bedrock-api-key-"):
+                        # short-term keys are presigned with the console session's credentials: they die with that
+                        # session, often well before the 12 h shown in the console
+                        hint = ("This is a short-term key: it stops working when the AWS console session that "
+                                "created it ends. Generate a long-term key (Bedrock > API keys) or use an IAM role.")
+                    raise LLMError(f"Credentials rejected ({self.auth}): the key is invalid, expired or revoked. "
+                                   f"{hint} [{e.message}]") from e
                 raise LLMError(f"Access denied to {kwargs['model']}: enable model access in the Bedrock console "
                                f"and check IAM (bedrock-mantle:CreateInference / bedrock:InvokeModel). {e.message}") from e
             except a.NotFoundError as e:

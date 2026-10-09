@@ -1,0 +1,43 @@
+{
+  "family": "ai-value-auditor",
+  "requiresCompatibilities": ["FARGATE"],
+  "networkMode": "awsvpc",
+  "cpu": "1024",
+  "memory": "4096",
+  "runtimePlatform": {"cpuArchitecture": "X86_64", "operatingSystemFamily": "LINUX"},
+  "executionRoleArn": "arn:aws:iam::CHANGE-ME-ACCOUNT:role/ecsTaskExecutionRole",
+  "taskRoleArn": "arn:aws:iam::CHANGE-ME-ACCOUNT:role/ai-value-auditor-task",
+  "containerDefinitions": [
+    {
+      "name": "auditor",
+      "image": "CHANGE-ME-ACCOUNT.dkr.ecr.ap-southeast-2.amazonaws.com/ai-value-auditor:latest",
+      "essential": true,
+      "portMappings": [{"containerPort": 8080, "protocol": "tcp"}],
+      "environment": [
+        {"name": "AWS_REGION", "value": "ap-southeast-2"},
+        {"name": "AUDITOR_LLM", "value": "bedrock"},
+        {"name": "AUDITOR_BEDROCK_API", "value": "invoke"},
+        {"name": "AUDITOR_BEDROCK_MODEL", "value": "global.anthropic.claude-opus-4-6-v1"},
+        {"name": "AUDITOR_EFFORT", "value": "medium"},
+        {"name": "AUDITOR_DATA_S3_URI", "value": "s3://CHANGE-ME-BUCKET/auditor-data"}
+      ],
+      "secrets": [
+        {"name": "AUDITOR_BASIC_AUTH",
+         "valueFrom": "arn:aws:secretsmanager:ap-southeast-2:CHANGE-ME-ACCOUNT:secret:ai-value-auditor/basic-auth"}
+      ],
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group": "/ecs/ai-value-auditor",
+          "awslogs-region": "ap-southeast-2",
+          "awslogs-stream-prefix": "auditor",
+          "awslogs-create-group": "true"
+        }
+      },
+      "healthCheck": {
+        "command": ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/api/health', timeout=4)\""],
+        "interval": 30, "timeout": 5, "retries": 3, "startPeriod": 90
+      }
+    }
+  ]
+}

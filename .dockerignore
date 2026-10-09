@@ -1,0 +1,24 @@
+# secrets and local state never go into the image
+.env
+.env.*
+!.env.example
+.state/
+*.sqlite
+
+# REPH materials: the zip/PDF stay out; extracted ./data IS copied when present (see Dockerfile)
+center_data.zip
+center_data/
+*.pdf
+
+# dev clutter
+.git/
+.gitignore
+.vscode/
+.idea/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+tests/
+deploy/
+*.md
+!README.md

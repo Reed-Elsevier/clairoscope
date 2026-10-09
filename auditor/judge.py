@@ -51,6 +51,7 @@ def guardrail_harm(metric_key: str, eff: dict | None) -> dict | None:
     else:
         return None
     return {"metric": metric_key, "label": m.label, "severity": sev, "evidence": eff["evidence"],
+            "unit": m.unit, "before": eff["baseline"], "after": eff["current"],
             "text": f"{m.label} worsened {_diff_fmt(eff['diff'], m.unit)} ({eff['rel']:+.1%}), p={eff['p']:.2g}"}
 
 
