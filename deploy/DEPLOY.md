@@ -13,10 +13,16 @@ One container (FastAPI API + web UI on port 8080). Two supported paths, matching
 
 1. **Region**: `ap-southeast-2` (the team's Bedrock access is there).
 2. **Bedrock model access**: `global.anthropic.claude-opus-4-6-v1` (verified working for our account).
-3. **Data in S3** (stays inside the event AWS account, per brief §7). From a machine with the extracted data:
+3. **Data in S3** (stays inside the event AWS account, per brief §7). From a machine with the extracted data,
+   build `used/`: one flat folder with only what Clairoscope reads (26 `.parquet` tables + `data_dictionary.csv` +
+   `03_data_dictionary.md`, about 78 MB instead of 228 MB). Upload its contents to the prefix, e.g. select all
+   28 files in the S3 console, or:
    ```bash
-   aws s3 sync data/ s3://CHANGE-ME-BUCKET/auditor-data/ --exclude "*" --include "*.parquet" --include "_docs/*"
+   python scripts/make_used_data.py
+   aws s3 sync used/ s3://CHANGE-ME-BUCKET/auditor-data/
    ```
+   To give Claude's measure builder every work-record table instead, upload `data/` the same way
+   (`aws s3 sync data/ s3://CHANGE-ME-BUCKET/auditor-data/ --exclude "*" --include "*.parquet" --include "_docs/*"`).
 4. **IAM role** with [`iam-policy.json`](iam-policy.json) (replace `CHANGE-ME-BUCKET`): Bedrock invoke + read
    the data prefix. Use it as the EC2 instance profile (A) or the ECS task role (B).
    With a role, **no Bedrock key is needed** in the app; credentials rotate automatically.

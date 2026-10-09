@@ -126,6 +126,7 @@ Requires Python 3.11+ and the REPH data package (`center_data.zip`, kept out of 
 ```powershell
 pip install -r requirements.txt
 python scripts/extract_data.py              # center_data.zip -> ./data (Parquet + _docs)
+python scripts/make_used_data.py            # optional: ./used = the 26 tables + dictionary, one flat folder (for upload)
 copy .env.example .env                      # then fill in the Bedrock section
 python scripts/check_llm.py                 # prints provider/model/region/auth, makes one test call -> READY
 python -m uvicorn web.server:app --port 8080 # http://localhost:8080  (add ?uc=UC0002&ai=0 for a fast rule-based demo link)
@@ -206,7 +207,7 @@ auditor/
   schema.py             data-dictionary retrieval (BM25 over table and column descriptions)
   measure_builder.py    Claude-designed measures: validation, attribution, outcome-delay cut-off, fingerprint
   ledger.py, memo.py    decision ledger (SQLite) and memo export
-scripts/                extract_data.py, fetch_data.py (S3), check_llm.py, audit_cli.py
+scripts/                extract_data.py, make_used_data.py, fetch_data.py (S3), check_llm.py, audit_cli.py
 deploy/                 DEPLOY.md, IAM policy, EC2 user data, ECS task definition, ECR push script
 Dockerfile              one container for EC2 / ECS
 tests/                  verdict regression, robustness, LLM guards, attribution, measure builder, web API

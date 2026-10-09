@@ -8,6 +8,7 @@
 # REPH materials: the zip/PDF stay out; extracted ./data IS copied when present (see Dockerfile)
 center_data.zip
 center_data/
+used/
 *.pdf
 
 # dev clutter

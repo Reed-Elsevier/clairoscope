@@ -13,7 +13,7 @@ import re
 from collections import Counter
 from functools import lru_cache
 
-from .db import data_dir
+from .db import docs_dir, parquet_files
 
 # Tables that hold what teams *report* about AI, not the operational record of the work itself.
 SELF_REPORTED_DOMAINS = {"J_ai_portfolio"}
@@ -30,7 +30,7 @@ def _tok(text: str) -> list[str]:
 @lru_cache(maxsize=1)
 def dictionary() -> dict[str, dict]:
     """table -> {table, domain, description, columns: [{name, type, key, allowed, meaning}]}"""
-    docs = data_dir() / "_docs"
+    docs = docs_dir()
     tables: dict[str, dict] = {}
     with open(docs / "data_dictionary.csv", encoding="utf-8") as f:
         for r in csv.DictReader(f):
@@ -53,9 +53,15 @@ def _doc_text(t: dict) -> str:
 
 
 @lru_cache(maxsize=1)
+def available() -> frozenset[str]:
+    """Tables whose data is actually loaded (a deployment may upload only a subset, see make_used_data.py)."""
+    return frozenset(p.stem for p in parquet_files())
+
+
+@lru_cache(maxsize=1)
 def _index() -> tuple[dict[str, Counter], dict[str, float], float]:
     tf = {name: Counter(_tok(_doc_text(t))) for name, t in dictionary().items()
-          if t["domain"] not in SELF_REPORTED_DOMAINS}
+          if t["domain"] not in SELF_REPORTED_DOMAINS and name in available()}
     n = len(tf)
     df = Counter(w for c in tf.values() for w in c)
     idf = {w: math.log(1 + (n - d + 0.5) / (d + 0.5)) for w, d in df.items()}

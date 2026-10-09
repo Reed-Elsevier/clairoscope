@@ -223,8 +223,8 @@ def _design(llm: LLM, payload: dict, feedback: list[str] | None) -> dict:
     spec = llm.json(BUILDER_SYSTEM, json.dumps(payload, default=str), DESIGN_SCHEMA)
     if not spec.get("feasible"):
         raise NotFeasible("Claude found no table that records this project's work: " + spec.get("why", ""))
-    if spec.get("table") not in schema.dictionary():
-        raise ValueError(f"table {spec.get('table')!r} does not exist")
+    if spec.get("table") not in schema.available():
+        raise ValueError(f"table {spec.get('table')!r} is not loaded; use one of the tables provided")
     cols = schema.columns(spec["table"])
     if spec.get("time_column") not in cols:
         raise ValueError(f"time column {spec.get('time_column')!r} is not a column of {spec['table']}")
@@ -241,7 +241,8 @@ def build(uc: dict, claim: dict | None, rollout: str, llm: LLM, retrieved: int =
     query_text = " ".join(str(x) for x in (uc.get("name"), uc.get("primary_kpi"), uc.get("process_name"),
                                            (claim or {}).get("kpi_name")) if x)
     cards = schema.search(query_text, retrieved)
-    if uc.get("process_has_event_log") and "process_event_log" not in {c["table"] for c in cards}:
+    if (uc.get("process_has_event_log") and "process_event_log" in schema.available()
+            and "process_event_log" not in {c["table"] for c in cards}):
         cards.append(schema.dictionary()["process_event_log"])
     payload = {
         "project": {"name": uc.get("name"), "kpi_claimed": uc.get("primary_kpi"), "process": uc.get("process_name"),
