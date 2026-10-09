@@ -1,0 +1,20 @@
+# REPH-provided materials: event use only, never pushed (see brief section 7)
+REPH AI Summit 2026 Academe Hackathon Challenge Brief.pdf
+*.pdf
+center_data.zip
+center_data/
+data/
+
+# Local state
+.state/
+.env
+*.sqlite
+*.duckdb
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.streamlit/secrets.toml
