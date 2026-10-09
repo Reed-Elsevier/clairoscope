@@ -126,7 +126,7 @@ Requires Python 3.11+ and the REPH data package (`center_data.zip`, kept out of 
 ```powershell
 pip install -r requirements.txt
 python scripts/extract_data.py              # center_data.zip -> ./data (Parquet + _docs)
-python scripts/make_used_data.py            # optional: ./used = the 26 tables + dictionary, one flat folder (for upload)
+python scripts/make_used_data.py            # optional: ./used = 3 files to upload (the 26 tables in one .duckdb + dictionary)
 copy .env.example .env                      # then fill in the Bedrock section
 python scripts/check_llm.py                 # prints provider/model/region/auth, makes one test call -> READY
 python -m uvicorn web.server:app --port 8080 # http://localhost:8080  (add ?uc=UC0002&ai=0 for a fast rule-based demo link)

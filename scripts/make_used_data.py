@@ -1,11 +1,13 @@
-"""Copy only the data Clairoscope reads into ./used, all in one flat folder, for a select-all upload to S3.
+"""Pack only the data Clairoscope reads into 3 files in ./used, for upload portals that limit the file count.
 
-    python scripts/make_used_data.py            # ./data -> ./used  (26 tables + the data dictionary)
-    aws s3 sync used/ s3://<bucket>/clairoscope-data/
+    python scripts/make_used_data.py
+    -> used/clairoscope.duckdb       the 26 tables the code reads (one DuckDB database file)
+       used/data_dictionary.csv      the data dictionary the measure builder searches
+       used/03_data_dictionary.md    table descriptions for the same search
 
-The app reads the flat ./used exactly like the nested ./data (set AUDITOR_DATA_DIR=used locally, or point AUDITOR_DATA_S3_URI at the
-uploaded prefix). With this subset, the measure builder only considers the tables present.
-REPH data: ./used is gitignored and never leaves the event environment.
+Upload those 3 files to the deployment's data location (or an S3 prefix set as AUDITOR_DATA_S3_URI). The app
+reads the .duckdb file directly, read-only; no unpacking. With this subset the measure builder only considers
+the tables present. REPH data: ./used is gitignored and never leaves the event environment.
 """
 from __future__ import annotations
 
@@ -14,8 +16,11 @@ import shutil
 import sys
 from pathlib import Path
 
+import duckdb
+
 ROOT = Path(__file__).resolve().parent.parent
 SRC, DST = ROOT / "data", ROOT / "used"
+DB_NAME = "clairoscope.duckdb"
 DOCS = ["data_dictionary.csv", "03_data_dictionary.md"]  # the measure builder searches these
 
 
@@ -33,21 +38,24 @@ def main() -> int:
         print("No data in ./data. Run: python scripts/extract_data.py")
         return 1
     wanted = tables_in_code()
-    if DST.exists():  # OneDrive / Explorer can briefly lock an empty folder; leftovers are harmless
-        shutil.rmtree(DST, ignore_errors=True)
-    copied, size = [], 0
+    DST.mkdir(parents=True, exist_ok=True)
+    for old in DST.iterdir():  # file by file: OneDrive / Explorer can lock a folder being deleted
+        shutil.rmtree(old, ignore_errors=True) if old.is_dir() else old.unlink()
+    con = duckdb.connect(str(DST / DB_NAME))
+    packed = []
     for p in sorted(SRC.glob("*/*.parquet")):
         if p.stem in wanted:
-            DST.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(p, DST / p.name)  # flat: table names are unique across the area folders
-            copied.append(p.name)
-            size += p.stat().st_size
+            con.execute(f'create table "{p.stem}" as select * from read_parquet(?)', [p.as_posix()])
+            packed.append(p.stem)
+    con.execute("checkpoint")
+    con.close()
     for d in DOCS:
         shutil.copy2(SRC / "_docs" / d, DST / d)
-    for c in copied:
-        print("  ", c)
-    print(f"{len(copied)} tables ({size / 1e6:.1f} MB) + {len(DOCS)} dictionary files -> {DST}")
-    missing = wanted - {Path(c).stem for c in copied}
+    files = sorted(f for f in DST.iterdir() if f.is_file())
+    for f in files:
+        print(f"   {f.name:28} {f.stat().st_size / 1e6:7.1f} MB")
+    print(f"{len(packed)} tables packed into {DB_NAME}; {len(files)} files to upload from {DST}")
+    missing = wanted - set(packed)
     if missing:
         print("Missing from ./data:", ", ".join(sorted(missing)))
         return 1

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+import re
 from functools import lru_cache
 from pathlib import Path
 
@@ -22,6 +23,11 @@ def parquet_files(base: Path | None = None) -> list[Path]:
     return sorted(nested + list(base.glob("*.parquet")))
 
 
+def database_files(base: Path | None = None) -> list[Path]:
+    """DuckDB files holding the tables (one file instead of many, for upload portals that limit file counts)."""
+    return sorted((base or data_dir()).glob("*.duckdb"))
+
+
 def docs_dir() -> Path:
     """Where the data dictionary lives: <data>/_docs, or the data folder itself in a flat upload."""
     return data_dir() / "_docs" if (data_dir() / "_docs").is_dir() else data_dir()
@@ -30,13 +36,21 @@ def docs_dir() -> Path:
 @lru_cache(maxsize=1)
 def _connection() -> duckdb.DuckDBPyConnection:
     base = data_dir()
-    files = parquet_files(base)
-    if not files:
+    files, dbs = parquet_files(base), database_files(base)
+    if not files and not dbs:
         raise FileNotFoundError(
-            f"No Parquet files under {base}. Run: python scripts/extract_data.py"
+            f"No Parquet or .duckdb data under {base}. Run: python scripts/extract_data.py"
         )
     con = duckdb.connect()
     seen: set[str] = set()
+    for i, d in enumerate(dbs):  # tables inside a .duckdb file, read-only
+        alias = f"src{i}_{re.sub(r'[^A-Za-z0-9_]', '_', d.stem)}"
+        con.execute(f"attach '{d.resolve().as_posix().replace(chr(39), chr(39) * 2)}' as {alias} (read_only)")
+        names = con.execute("select table_name from duckdb_tables() where database_name = ? order by 1", [alias]).fetchall()
+        for (t,) in names:
+            if t not in seen:
+                seen.add(t)
+                con.execute(f'create view "{t}" as select * from {alias}.main."{t}"')
     for p in files:
         if p.stem in seen:  # the same table in two places (e.g. nested and flat copies): load it once
             continue

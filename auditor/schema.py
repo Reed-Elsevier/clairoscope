@@ -13,7 +13,7 @@ import re
 from collections import Counter
 from functools import lru_cache
 
-from .db import docs_dir, parquet_files
+from .db import docs_dir, tables
 
 # Tables that hold what teams *report* about AI, not the operational record of the work itself.
 SELF_REPORTED_DOMAINS = {"J_ai_portfolio"}
@@ -55,7 +55,7 @@ def _doc_text(t: dict) -> str:
 @lru_cache(maxsize=1)
 def available() -> frozenset[str]:
     """Tables whose data is actually loaded (a deployment may upload only a subset, see make_used_data.py)."""
-    return frozenset(p.stem for p in parquet_files())
+    return frozenset(tables())
 
 
 @lru_cache(maxsize=1)

@@ -161,8 +161,8 @@ the rules were then fixed. This is a small sample and is not yet a measured succ
 **Source:** only the synthetic REPH AI Summit 2026 dataset provided for the hackathon (`center_data.zip`):
 116 tables, about 8.9 million rows, in 11 domain folders, plus its documentation. No outside data is added and
 no data is modified or generated. Locally the files live in `data/` (kept out of git); on AWS they are read from
-a private S3 location in the event account. `python scripts/make_used_data.py` copies just the tables below plus
-the data dictionary into one flat folder, `used/` (78 MB instead of 228 MB), for upload; with that subset the measure builder
+a private S3 location in the event account. `python scripts/make_used_data.py` packs just the tables below into one
+database file plus the two data-dictionary files (3 files in `used/`) for upload portals that limit file counts; with that subset the measure builder
 only considers the tables present.
 
 **Tables the code reads (26), by folder under `data/`:**
