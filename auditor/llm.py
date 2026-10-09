@@ -4,7 +4,8 @@ Core provider: Claude on Amazon Bedrock. Configure with environment variables (s
 
   AUDITOR_LLM            bedrock (default when AWS settings are present) | claude | openai | off
   AWS_REGION             required for Bedrock (no silent default)
-  AUDITOR_BEDROCK_MODEL  default anthropic.claude-opus-5-5
+  AUDITOR_BEDROCK_MODEL  default global.anthropic.claude-opus-4-6-v1 (verified on the team account; use
+                         anthropic.claude-opus-5-5 where the account has Bedrock Messages access to it)
   AUDITOR_BEDROCK_API    mantle | invoke | auto (default auto: inference-profile / ARN / versioned IDs -> invoke)
   Auth                   AWS credential chain (env keys, AWS_PROFILE/SSO, instance or task role)
                          or a Bedrock bearer token in AWS_BEARER_TOKEN_BEDROCK
@@ -103,7 +104,7 @@ class ClaudeLLM:
             self.region = os.environ.get("AWS_REGION") or os.environ.get("AWS_DEFAULT_REGION")
             if not self.region:
                 raise LLMError("Set AWS_REGION (e.g. us-east-1) for Bedrock.")
-            self.model = os.environ.get("AUDITOR_BEDROCK_MODEL", "anthropic.claude-opus-5-5")
+            self.model = os.environ.get("AUDITOR_BEDROCK_MODEL", "global.anthropic.claude-opus-4-6-v1")
             api = os.environ.get("AUDITOR_BEDROCK_API", "auto").lower()
             if api == "auto":
                 api = "invoke" if (self.model.startswith(self.INVOKE_PREFIXES) or ":" in self.model) else "mantle"
